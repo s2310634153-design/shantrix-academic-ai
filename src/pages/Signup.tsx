@@ -1,13 +1,17 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileCheck } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export default function Signup() {
+  const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     userType: "",
     name: "",
@@ -16,10 +20,35 @@ export default function Signup() {
     institution: "",
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Authentication logic will be added later
-    console.log("Signup:", formData);
+    setIsLoading(true);
+
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/dashboard`,
+          data: {
+            full_name: formData.name,
+            user_type: formData.userType,
+            institution: formData.institution,
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        toast.success("Account created successfully! Redirecting...");
+        setTimeout(() => navigate("/dashboard"), 1000);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to create account");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -103,8 +132,12 @@ export default function Signup() {
               />
             </div>
 
-            <Button type="submit" className="w-full bg-accent hover:bg-accent/90">
-              Create Account
+            <Button 
+              type="submit" 
+              className="w-full bg-accent hover:bg-accent/90"
+              disabled={isLoading || !formData.userType || !formData.name || !formData.email || !formData.password}
+            >
+              {isLoading ? "Creating account..." : "Create Account"}
             </Button>
           </form>
 
@@ -118,7 +151,23 @@ export default function Signup() {
               </div>
             </div>
             
-            <Button variant="outline" className="w-full mt-4" disabled>
+            <Button 
+              variant="outline" 
+              className="w-full mt-4" 
+              onClick={async () => {
+                try {
+                  const { error } = await supabase.auth.signInWithOAuth({
+                    provider: 'google',
+                    options: {
+                      redirectTo: `${window.location.origin}/dashboard`,
+                    },
+                  });
+                  if (error) throw error;
+                } catch (error: any) {
+                  toast.error(error.message || "Failed to sign in with Google");
+                }
+              }}
+            >
               <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
                 <path
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
