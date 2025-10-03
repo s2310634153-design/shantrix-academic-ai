@@ -88,15 +88,24 @@ export default function Dashboard() {
   };
 
   const extractTextFromFile = async (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const text = e.target?.result as string;
-        resolve(text);
-      };
-      reader.onerror = reject;
-      reader.readAsText(file);
-    });
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    
+    // Only extract text from .txt files on client side
+    if (extension === 'txt') {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const text = e.target?.result as string;
+          resolve(text);
+        };
+        reader.onerror = reject;
+        reader.readAsText(file);
+      });
+    }
+    
+    // For binary files (PDF, DOCX), return placeholder text
+    // The edge function will handle proper extraction
+    return `[Document: ${file.name}] - Content will be extracted during analysis`;
   };
 
   const handleFileSubmit = async (e: React.FormEvent) => {
