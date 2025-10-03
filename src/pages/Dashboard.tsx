@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { FileCheck, Upload, FileText, Clock, CheckCircle2, LogOut } from "lucide-react";
@@ -16,12 +18,16 @@ export default function Dashboard() {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [manualText, setManualText] = useState("");
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     // Check authentication
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setUser(session.user);
+        loadSubmissions();
       } else {
         navigate("/login");
       }
@@ -32,6 +38,7 @@ export default function Dashboard() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setUser(session.user);
+        setTimeout(() => loadSubmissions(), 0);
       } else {
         navigate("/login");
       }
@@ -39,6 +46,21 @@ export default function Dashboard() {
 
     return () => subscription.unsubscribe();
   }, [navigate]);
+
+  const loadSubmissions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('submissions')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setSubmissions(data || []);
+    } catch (error: any) {
+      console.error('Error loading submissions:', error);
+      toast.error('Failed to load submissions');
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -58,29 +80,6 @@ export default function Dashboard() {
     );
   }
 
-  const mockSubmissions = [
-    {
-      id: 1,
-      title: "Research Paper - AI Ethics",
-      date: "2025-01-15",
-      status: "completed",
-      score: 92,
-    },
-    {
-      id: 2,
-      title: "Literature Review Draft",
-      date: "2025-01-14",
-      status: "processing",
-      score: null,
-    },
-    {
-      id: 3,
-      title: "Case Study Analysis",
-      date: "2025-01-10",
-      status: "completed",
-      score: 88,
-    },
-  ];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -88,11 +87,110 @@ export default function Dashboard() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const extractTextFromFile = async (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        resolve(text);
+      };
+      reader.onerror = reject;
+      reader.readAsText(file);
+    });
+  };
+
+  const handleFileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedFile) {
-      console.log("Uploading:", selectedFile);
-      // Upload logic will be added later
+    if (!selectedFile || !user) return;
+
+    setIsSubmitting(true);
+    try {
+      // Extract text from file
+      const content = await extractTextFromFile(selectedFile);
+      
+      // Upload file to storage
+      const filePath = `${user.id}/${Date.now()}_${selectedFile.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('submissions')
+        .upload(filePath, selectedFile);
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('submissions')
+        .getPublicUrl(filePath);
+
+      // Create submission
+      const { data: submission, error: submitError } = await supabase
+        .from('submissions')
+        .insert({
+          user_id: user.id,
+          title: selectedFile.name,
+          content,
+          file_url: publicUrl,
+          file_name: selectedFile.name,
+          status: 'processing'
+        })
+        .select()
+        .single();
+
+      if (submitError) throw submitError;
+
+      // Trigger analysis
+      const { error: analyzeError } = await supabase.functions.invoke('analyze-submission', {
+        body: { submissionId: submission.id }
+      });
+
+      if (analyzeError) throw analyzeError;
+
+      toast.success('File submitted for analysis!');
+      setSelectedFile(null);
+      loadSubmissions();
+    } catch (error: any) {
+      console.error('Error submitting file:', error);
+      toast.error(error.message || 'Failed to submit file');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleTextSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualText.trim() || !user) return;
+
+    setIsSubmitting(true);
+    try {
+      // Create submission
+      const title = manualText.substring(0, 50) + (manualText.length > 50 ? '...' : '');
+      const { data: submission, error: submitError } = await supabase
+        .from('submissions')
+        .insert({
+          user_id: user.id,
+          title,
+          content: manualText,
+          status: 'processing'
+        })
+        .select()
+        .single();
+
+      if (submitError) throw submitError;
+
+      // Trigger analysis
+      const { error: analyzeError } = await supabase.functions.invoke('analyze-submission', {
+        body: { submissionId: submission.id }
+      });
+
+      if (analyzeError) throw analyzeError;
+
+      toast.success('Text submitted for analysis!');
+      setManualText('');
+      loadSubmissions();
+    } catch (error: any) {
+      console.error('Error submitting text:', error);
+      toast.error(error.message || 'Failed to submit text');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -139,36 +237,73 @@ export default function Dashboard() {
             {/* Upload Section */}
             <Card className="shadow-elevated">
               <CardHeader>
-                <CardTitle>Upload New Submission</CardTitle>
+                <CardTitle>Submit for Analysis</CardTitle>
                 <CardDescription>
-                  Upload your document for plagiarism checking. Supported formats: DOCX, PDF, TXT
+                  Upload a document or paste text for AI and plagiarism detection
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="file">Select Document</Label>
-                    <Input
-                      id="file"
-                      type="file"
-                      accept=".docx,.pdf,.txt"
-                      onChange={handleFileChange}
-                      required
-                    />
-                  </div>
-                  {selectedFile && (
-                    <div className="p-3 bg-secondary rounded-lg text-sm">
-                      <p className="font-medium">Selected: {selectedFile.name}</p>
-                      <p className="text-muted-foreground">
-                        Size: {(selectedFile.size / 1024).toFixed(2)} KB
-                      </p>
-                    </div>
-                  )}
-                  <Button type="submit" className="w-full bg-accent hover:bg-accent/90">
-                    <Upload className="mr-2 h-4 w-4" />
-                    Submit for Analysis
-                  </Button>
-                </form>
+                <Tabs defaultValue="file" className="w-full">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="file">Upload File</TabsTrigger>
+                    <TabsTrigger value="text">Paste Text</TabsTrigger>
+                  </TabsList>
+                  
+                  <TabsContent value="file" className="space-y-4 mt-4">
+                    <form onSubmit={handleFileSubmit} className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="file">Select Document</Label>
+                        <Input
+                          id="file"
+                          type="file"
+                          accept=".txt,.docx,.pdf"
+                          onChange={handleFileChange}
+                          required
+                        />
+                      </div>
+                      {selectedFile && (
+                        <div className="p-3 bg-secondary rounded-lg text-sm">
+                          <p className="font-medium">Selected: {selectedFile.name}</p>
+                          <p className="text-muted-foreground">
+                            Size: {(selectedFile.size / 1024).toFixed(2)} KB
+                          </p>
+                        </div>
+                      )}
+                      <Button 
+                        type="submit" 
+                        className="w-full bg-accent hover:bg-accent/90"
+                        disabled={isSubmitting}
+                      >
+                        <Upload className="mr-2 h-4 w-4" />
+                        {isSubmitting ? 'Submitting...' : 'Submit for Analysis'}
+                      </Button>
+                    </form>
+                  </TabsContent>
+                  
+                  <TabsContent value="text" className="space-y-4 mt-4">
+                    <form onSubmit={handleTextSubmit} className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="text">Paste Your Text</Label>
+                        <Textarea
+                          id="text"
+                          placeholder="Paste your text here for analysis..."
+                          value={manualText}
+                          onChange={(e) => setManualText(e.target.value)}
+                          className="min-h-[200px]"
+                          required
+                        />
+                      </div>
+                      <Button 
+                        type="submit" 
+                        className="w-full bg-accent hover:bg-accent/90"
+                        disabled={isSubmitting}
+                      >
+                        <FileCheck className="mr-2 h-4 w-4" />
+                        {isSubmitting ? 'Submitting...' : 'Submit for Analysis'}
+                      </Button>
+                    </form>
+                  </TabsContent>
+                </Tabs>
               </CardContent>
             </Card>
 
@@ -190,41 +325,49 @@ export default function Dashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {mockSubmissions.map((submission) => (
-                      <TableRow key={submission.id}>
-                        <TableCell className="font-medium">{submission.title}</TableCell>
-                        <TableCell>{submission.date}</TableCell>
-                        <TableCell>
-                          {submission.status === "completed" ? (
-                            <Badge className="bg-green-500">
-                              <CheckCircle2 className="mr-1 h-3 w-3" />
-                              Completed
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary">
-                              <Clock className="mr-1 h-3 w-3" />
-                              Processing
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {submission.score ? (
-                            <span className="font-bold text-accent">{submission.score}%</span>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {submission.status === "completed" && (
-                            <Link to={`/report/${submission.id}`}>
-                              <Button size="sm" variant="outline">
-                                View Report
-                              </Button>
-                            </Link>
-                          )}
+                    {submissions.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          No submissions yet. Submit your first document above!
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ) : (
+                      submissions.map((submission) => (
+                        <TableRow key={submission.id}>
+                          <TableCell className="font-medium">{submission.title}</TableCell>
+                          <TableCell>{new Date(submission.created_at).toLocaleDateString()}</TableCell>
+                          <TableCell>
+                            {submission.status === "completed" ? (
+                              <Badge className="bg-green-500">
+                                <CheckCircle2 className="mr-1 h-3 w-3" />
+                                Completed
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">
+                                <Clock className="mr-1 h-3 w-3" />
+                                Processing
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {submission.originality_score ? (
+                              <span className="font-bold text-accent">{submission.originality_score}%</span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {submission.status === "completed" && (
+                              <Link to={`/report/${submission.id}`}>
+                                <Button size="sm" variant="outline">
+                                  View Report
+                                </Button>
+                              </Link>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </CardContent>

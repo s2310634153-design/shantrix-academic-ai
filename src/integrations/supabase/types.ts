@@ -14,7 +14,133 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      matches: {
+        Row: {
+          created_at: string
+          end_position: number
+          id: string
+          match_type: string
+          matched_text: string
+          report_id: string
+          similarity_percentage: number
+          source_name: string
+          source_type: string
+          source_url: string | null
+          start_position: number
+        }
+        Insert: {
+          created_at?: string
+          end_position: number
+          id?: string
+          match_type?: string
+          matched_text: string
+          report_id: string
+          similarity_percentage: number
+          source_name: string
+          source_type: string
+          source_url?: string | null
+          start_position: number
+        }
+        Update: {
+          created_at?: string
+          end_position?: number
+          id?: string
+          match_type?: string
+          matched_text?: string
+          report_id?: string
+          similarity_percentage?: number
+          source_name?: string
+          source_type?: string
+          source_url?: string | null
+          start_position?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "matches_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reports: {
+        Row: {
+          ai_score: number
+          created_at: string
+          id: string
+          originality_score: number
+          submission_id: string
+          total_matches: number
+        }
+        Insert: {
+          ai_score: number
+          created_at?: string
+          id?: string
+          originality_score: number
+          submission_id: string
+          total_matches?: number
+        }
+        Update: {
+          ai_score?: number
+          created_at?: string
+          id?: string
+          originality_score?: number
+          submission_id?: string
+          total_matches?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reports_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "submissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      submissions: {
+        Row: {
+          ai_score: number | null
+          content: string
+          created_at: string
+          file_name: string | null
+          file_url: string | null
+          id: string
+          originality_score: number | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_score?: number | null
+          content: string
+          created_at?: string
+          file_name?: string | null
+          file_url?: string | null
+          id?: string
+          originality_score?: number | null
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_score?: number | null
+          content?: string
+          created_at?: string
+          file_name?: string | null
+          file_url?: string | null
+          id?: string
+          originality_score?: number | null
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
