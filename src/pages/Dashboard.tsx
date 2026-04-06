@@ -8,10 +8,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { FileCheck, Upload, FileText, Clock, CheckCircle2, LogOut, Lightbulb, Wand2, FileSearch } from "lucide-react";
+import { FileCheck, Upload, FileText, Clock, CheckCircle2, LogOut, Lightbulb, Wand2, FileSearch, CreditCard, Shield } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
+import { useUserRole } from "@/hooks/useUserRole";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -21,6 +22,7 @@ export default function Dashboard() {
   const [manualText, setManualText] = useState("");
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { role, isAdmin } = useUserRole();
 
   useEffect(() => {
     // Check authentication
@@ -247,6 +249,25 @@ export default function Dashboard() {
                 AI Paraphraser & Humanizer
               </Button>
             </Link>
+            <Link to="/pricing" className="block">
+              <Button variant="ghost" className="w-full justify-start">
+                <CreditCard className="mr-2 h-4 w-4" />
+                Pricing
+              </Button>
+            </Link>
+            {isAdmin && (
+              <Link to="/admin" className="block">
+                <Button variant="ghost" className="w-full justify-start text-highlight">
+                  <Shield className="mr-2 h-4 w-4" />
+                  Admin Panel
+                </Button>
+              </Link>
+            )}
+            <div className="pt-2 px-2">
+              <Badge variant={role === "premium" || role === "admin" ? "default" : "secondary"} className="w-full justify-center">
+                {role.charAt(0).toUpperCase() + role.slice(1)} Plan
+              </Badge>
+            </div>
           </aside>
 
           {/* Main Content */}
