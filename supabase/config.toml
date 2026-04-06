@@ -2,3 +2,9 @@ project_id = "bcyzbrytrdpibhgkmjnl"
 
 [functions.analyze-submission]
 verify_jwt = true
+
+[functions.research-topic-finder]
+verify_jwt = true
+
+[functions.paraphraser]
+verify_jwt = true
