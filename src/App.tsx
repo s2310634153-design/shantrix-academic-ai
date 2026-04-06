@@ -11,6 +11,7 @@ import ReportView from "./pages/ReportView";
 import Pricing from "./pages/Pricing";
 import ResearchTopicFinder from "./pages/ResearchTopicFinder";
 import Paraphraser from "./pages/Paraphraser";
+import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +31,7 @@ const App = () => (
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/research-topics" element={<ResearchTopicFinder />} />
           <Route path="/paraphraser" element={<Paraphraser />} />
+          <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
