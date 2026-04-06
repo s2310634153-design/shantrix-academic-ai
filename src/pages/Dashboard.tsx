@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { FileCheck, Upload, FileText, Clock, CheckCircle2, LogOut } from "lucide-react";
+import { FileCheck, Upload, FileText, Clock, CheckCircle2, LogOut, Lightbulb, Wand2, FileSearch } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
@@ -232,13 +232,21 @@ export default function Dashboard() {
           {/* Sidebar */}
           <aside className="space-y-2">
             <Button variant="default" className="w-full justify-start bg-accent">
-              <FileText className="mr-2 h-4 w-4" />
-              My Submissions
+              <FileSearch className="mr-2 h-4 w-4" />
+              Originality Checker
             </Button>
-            <Button variant="ghost" className="w-full justify-start">
-              <Upload className="mr-2 h-4 w-4" />
-              Upload New
-            </Button>
+            <Link to="/research-topics" className="block">
+              <Button variant="ghost" className="w-full justify-start">
+                <Lightbulb className="mr-2 h-4 w-4" />
+                Research Topic Finder
+              </Button>
+            </Link>
+            <Link to="/paraphraser" className="block">
+              <Button variant="ghost" className="w-full justify-start">
+                <Wand2 className="mr-2 h-4 w-4" />
+                AI Paraphraser & Humanizer
+              </Button>
+            </Link>
           </aside>
 
           {/* Main Content */}
