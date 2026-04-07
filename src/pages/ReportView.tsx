@@ -1,22 +1,39 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { FileCheck, Download, Share2, ArrowLeft, Globe, BookOpen, FileText, Bot } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { FileCheck, Download, Share2, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { buildReport } from "@/lib/reportBuilder";
+import { GeneratedReport, MatchSpan, ReportSettings, clampScore } from "@/types/report";
+import DocumentViewer from "@/components/report/DocumentViewer";
+import ReportFilters from "@/components/report/ReportFilters";
+import ReportSidebar from "@/components/report/ReportSidebar";
+import EvidenceDrawer from "@/components/report/EvidenceDrawer";
+
+const DEFAULT_SETTINGS: ReportSettings = {
+  showAllHighlights: true,
+  showSimilarityOnly: false,
+  showAIOnly: false,
+  excludeQuotes: false,
+  excludeBibliography: false,
+  excludeSmallMatchesUnder: 0,
+  selectedSourceId: null,
+  highlightsOnlyMode: false,
+  zoomLevel: 100,
+};
 
 export default function ReportView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [selectedMatch, setSelectedMatch] = useState<string | null>(null);
-  const [report, setReport] = useState<any>(null);
-  const [submission, setSubmission] = useState<any>(null);
-  const [matches, setMatches] = useState<any[]>([]);
+  const [report, setReport] = useState<GeneratedReport | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [settings, setSettings] = useState<ReportSettings>(DEFAULT_SETTINGS);
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
 
   useEffect(() => {
     loadReport();
@@ -24,36 +41,29 @@ export default function ReportView() {
 
   const loadReport = async () => {
     try {
-      // Find submission by ID
       const { data: submissionData, error: subError } = await supabase
         .from('submissions')
         .select('*')
         .eq('id', id)
         .single();
-
       if (subError) throw subError;
-      setSubmission(submissionData);
 
-      // Get report for this submission
       const { data: reportData, error: repError } = await supabase
         .from('reports')
         .select('*')
         .eq('submission_id', id)
         .single();
-
       if (repError) throw repError;
-      setReport(reportData);
 
-      // Get matches for this report
       const { data: matchesData, error: matchError } = await supabase
         .from('matches')
         .select('*')
         .eq('report_id', reportData.id)
-        .order('similarity_percentage', { ascending: false });
-
+        .order('start_position', { ascending: true });
       if (matchError) throw matchError;
-      setMatches(matchesData || []);
 
+      const built = buildReport(submissionData, reportData, matchesData || []);
+      setReport(built);
     } catch (error: any) {
       console.error('Error loading report:', error);
       toast.error('Failed to load report');
@@ -63,12 +73,54 @@ export default function ReportView() {
     }
   };
 
-  const downloadReport = () => {
-    if (!submission || !report) return;
+  const selectedSpan = useMemo(() => {
+    if (!report || !selectedSpanId) return null;
+    return report.matchSpans.find((s) => s.id === selectedSpanId) || null;
+  }, [report, selectedSpanId]);
 
-    const wordCount = submission.content.split(/\s+/).length;
-    const charCount = submission.content.length;
-    const plagiarismPercent = 100 - report.originality_score - report.ai_score;
+  const sortedSpans = useMemo(() => {
+    if (!report) return [];
+    return [...report.matchSpans].sort((a, b) => a.startOffset - b.startOffset);
+  }, [report]);
+
+  const currentSpanIndex = useMemo(() => {
+    if (!selectedSpanId) return -1;
+    return sortedSpans.findIndex((s) => s.id === selectedSpanId);
+  }, [sortedSpans, selectedSpanId]);
+
+  const handleSpanClick = useCallback((span: MatchSpan) => {
+    setSelectedSpanId(span.id);
+    setEvidenceOpen(true);
+  }, []);
+
+  const handleNavigateEvidence = useCallback((dir: 'prev' | 'next') => {
+    const newIndex = dir === 'prev' ? currentSpanIndex - 1 : currentSpanIndex + 1;
+    if (newIndex >= 0 && newIndex < sortedSpans.length) {
+      setSelectedSpanId(sortedSpans[newIndex].id);
+    }
+  }, [currentSpanIndex, sortedSpans]);
+
+  const handleSourceSelect = useCallback((sourceId: string | null) => {
+    setSettings((s) => ({ ...s, selectedSourceId: sourceId }));
+  }, []);
+
+  const handleSpanSelect = useCallback((spanId: string) => {
+    setSelectedSpanId(spanId);
+  }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight' || e.key === 'n') handleNavigateEvidence('next');
+      if (e.key === 'ArrowLeft' || e.key === 'p') handleNavigateEvidence('prev');
+      if (e.key === 'Escape') setEvidenceOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleNavigateEvidence]);
+
+  const downloadReport = () => {
+    if (!report) return;
 
     const reportText = `
 ═══════════════════════════════════════════════════════
@@ -77,36 +129,38 @@ export default function ReportView() {
 
 SUBMISSION DETAILS
 ----------------------------------------------------------
-Document Title:      ${submission.title}
-Submission Date:     ${new Date(submission.created_at).toLocaleString()}
-Submission ID:       ${submission.id}
-${submission.file_name ? `File Name:           ${submission.file_name}` : ''}
+Document Title:      ${report.title}
+Submission Date:     ${new Date(report.submissionDate).toLocaleString()}
+Submission ID:       ${report.submissionId}
+${report.fileName ? `File Name:           ${report.fileName}` : ''}
 
 DOCUMENT STATISTICS
 ----------------------------------------------------------
-Word Count:          ${wordCount}
-Character Count:     ${charCount}
+Word Count:          ${report.wordCount}
+Character Count:     ${report.charCount}
+Total Pages:         ${report.totalPages}
 
 ANALYSIS RESULTS
 ----------------------------------------------------------
-Originality Score:   ${report.originality_score}%
-AI-Generated:        ${report.ai_score}%
-Plagiarism:          ${plagiarismPercent}%
-Total Matches:       ${report.total_matches}
+Similarity Score:    ${report.similarityScore}%
+AI-Generated:        ${report.aiScore}%
+Total Matches:       ${report.totalMatches}
+Total Sources:       ${report.totalSources}
 
 MATCHED SOURCES
 ----------------------------------------------------------
-${matches.map((match, idx) => `
-${idx + 1}. ${match.source_name}
-   Match Type:       ${match.match_type === 'ai_generated' ? 'AI Generated Content' : 'Plagiarism'}
-   Similarity:       ${match.similarity_percentage}%
-   Matched Text:     "${match.matched_text}"
-   ${match.source_url ? `Source URL:       ${match.source_url}` : ''}
+${report.sources.map((src, idx) => `
+${idx + 1}. ${src.title}
+   Type:              ${src.type}
+   Contribution:      ${src.percentContribution}%
+   Matched Words:     ${src.matchedWords}
+   Occurrences:       ${src.occurrences}
+   ${src.url ? `URL:               ${src.url}` : ''}
 `).join('\n')}
 
 FULL DOCUMENT TEXT
 ═══════════════════════════════════════════════════════
-${submission.content}
+${report.content}
 
 ═══════════════════════════════════════════════════════
 Report Generated by Shantrix - AI-Powered Academic Integrity Platform
@@ -118,106 +172,33 @@ Generated on: ${new Date().toLocaleString()}
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `shantrix-report-${submission.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.txt`;
+    a.download = `shantrix-report-${report.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.txt`;
     a.click();
     window.URL.revokeObjectURL(url);
     toast.success('Report downloaded!');
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 90) return "text-green-600";
-    if (score >= 70) return "text-yellow-600";
-    return "text-red-600";
-  };
-
-  const getSourceIcon = (type: string) => {
-    switch (type) {
-      case "journal":
-        return <BookOpen className="h-4 w-4" />;
-      case "web":
-        return <Globe className="h-4 w-4" />;
-      case "ai_detector":
-        return <Bot className="h-4 w-4" />;
-      case "student":
-        return <FileText className="h-4 w-4" />;
-      default:
-        return <FileText className="h-4 w-4" />;
-    }
-  };
-
-  const getMatchColor = (matchType: string) => {
-    return matchType === "ai_generated" 
-      ? "bg-blue-200 dark:bg-blue-900/40 border-b-2 border-blue-400" 
-      : "bg-yellow-200 dark:bg-yellow-900/40 border-b-2 border-yellow-400";
-  };
-
-  const renderHighlightedContent = () => {
-    if (!submission) return null;
-    
-    let content = submission.content;
-    
-    // If no matches, return the full content
-    if (matches.length === 0) {
-      return <div className="whitespace-pre-wrap leading-relaxed">{content}</div>;
-    }
-    
-    const parts: JSX.Element[] = [];
-    let lastIndex = 0;
-
-    // Sort matches by start position
-    const sortedMatches = [...matches].sort((a, b) => a.start_position - b.start_position);
-
-    sortedMatches.forEach((match, idx) => {
-      // Add text before match
-      if (match.start_position > lastIndex) {
-        const textBefore = content.substring(lastIndex, match.start_position);
-        parts.push(
-          <span key={`text-${idx}`} className="leading-relaxed">
-            {textBefore}
-          </span>
-        );
-      }
-
-      // Add highlighted match
-      const isSelected = selectedMatch === match.id;
-      const colorClass = getMatchColor(match.match_type);
-      const matchText = content.substring(match.start_position, match.end_position);
-      
-      parts.push(
-        <mark
-          key={`match-${idx}`}
-          className={`${colorClass} ${isSelected ? 'ring-2 ring-accent shadow-lg' : ''} px-1 rounded cursor-pointer transition-all font-medium`}
-          onClick={() => setSelectedMatch(match.id)}
-          title={`${match.match_type === 'ai_generated' ? 'AI Generated' : 'Plagiarism'} - ${match.similarity_percentage}% match with ${match.source_name}`}
-        >
-          {matchText}
-        </mark>
-      );
-
-      lastIndex = match.end_position;
-    });
-
-    // Add remaining text
-    if (lastIndex < content.length) {
-      parts.push(
-        <span key="text-end" className="leading-relaxed">
-          {content.substring(lastIndex)}
-        </span>
-      );
-    }
-
-    return <div className="whitespace-pre-wrap leading-relaxed">{parts}</div>;
-  };
-
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-secondary/30">
-        <p className="text-muted-foreground">Loading report...</p>
+      <div className="min-h-screen bg-secondary/30">
+        <nav className="border-b bg-background sticky top-0 z-50">
+          <div className="container mx-auto px-4 h-14 flex items-center">
+            <Skeleton className="h-6 w-48" />
+          </div>
+        </nav>
+        <div className="container mx-auto px-4 py-6">
+          <Skeleton className="h-32 w-full mb-6" />
+          <div className="grid lg:grid-cols-6 gap-4">
+            <Skeleton className="h-[700px]" />
+            <Skeleton className="h-[700px] lg:col-span-3" />
+            <Skeleton className="h-[700px] lg:col-span-2" />
+          </div>
+        </div>
       </div>
     );
   }
 
-  if (!report || !submission) {
+  if (!report) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-secondary/30">
         <p className="text-muted-foreground">Report not found</p>
@@ -229,217 +210,117 @@ Generated on: ${new Date().toLocaleString()}
     <div className="min-h-screen bg-secondary/30">
       {/* Navbar */}
       <nav className="border-b bg-background sticky top-0 z-50">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <div className="container mx-auto px-4 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
             <Link to="/dashboard">
               <Button variant="ghost" size="sm">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Dashboard
+                <ArrowLeft className="mr-1 h-4 w-4" />
+                Dashboard
               </Button>
             </Link>
-            <div className="flex items-center gap-2 font-bold text-xl">
-              <FileCheck className="h-6 w-6 text-accent" />
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-2 font-bold text-lg">
+              <FileCheck className="h-5 w-5 text-accent" />
               <span className="bg-gradient-primary bg-clip-text text-transparent">
                 Shantrix Similarity Report
               </span>
             </div>
           </div>
-          
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={downloadReport}>
-              <Download className="mr-2 h-4 w-4" />
-              Download Report
+              <Download className="mr-1 h-4 w-4" />
+              Download
             </Button>
             <Button variant="outline" size="sm" onClick={() => toast.info('Share feature coming soon!')}>
-              <Share2 className="mr-2 h-4 w-4" />
+              <Share2 className="mr-1 h-4 w-4" />
               Share
             </Button>
           </div>
         </div>
       </nav>
 
-      <div className="container mx-auto px-4 py-6">
-        {/* Submission Info Card */}
-        <Card className="mb-6 shadow-elevated">
-          <CardContent className="pt-6">
-            <div className="grid md:grid-cols-2 gap-6">
-              <div>
-                <h2 className="text-2xl font-bold mb-4">{submission.title}</h2>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Submission date:</span>
-                    <span className="font-medium">{new Date(submission.created_at).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Submission ID:</span>
-                    <span className="font-mono text-xs">{submission.id.substring(0, 13)}</span>
-                  </div>
-                  {submission.file_name && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">File name:</span>
-                      <span className="font-medium">{submission.file_name}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Word count:</span>
-                  <span className="font-medium">{submission.content.split(/\s+/).length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Character count:</span>
-                  <span className="font-medium">{submission.content.length}</span>
-                </div>
-                <Separator className="my-3" />
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Originality Score:</span>
-                  <span className={`text-2xl font-bold ${getScoreColor(report.originality_score)}`}>
-                    {report.originality_score}%
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">AI-Generated:</span>
-                  <span className="text-2xl font-bold text-blue-600">{report.ai_score}%</span>
-                </div>
-              </div>
+      {/* Metadata bar */}
+      <div className="border-b bg-background/80 backdrop-blur">
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+            <div>
+              <span className="text-muted-foreground">File: </span>
+              <span className="font-medium">{report.fileName || report.title}</span>
             </div>
-          </CardContent>
-        </Card>
+            <div>
+              <span className="text-muted-foreground">Date: </span>
+              <span className="font-medium">{new Date(report.submissionDate).toLocaleDateString()}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">ID: </span>
+              <span className="font-mono">{report.submissionId.substring(0, 13)}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Words: </span>
+              <span className="font-medium">{report.wordCount.toLocaleString()}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Pages: </span>
+              <span className="font-medium">{report.totalPages}</span>
+            </div>
 
-        <div className="grid lg:grid-cols-4 gap-6">
-          {/* Document Viewer (Main Panel - Takes 3 columns) */}
-          <Card className="lg:col-span-3 shadow-elevated">
-            <CardHeader className="border-b">
-              <div className="flex justify-between items-start">
-                <div>
-                  <CardTitle className="text-xl mb-2">Full Document Text</CardTitle>
-                  <div className="flex gap-6 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-300 rounded"></div>
-                      <span>Plagiarism Match</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 bg-blue-100 dark:bg-blue-900/30 border border-blue-300 rounded"></div>
-                      <span>AI Generated</span>
-                    </div>
-                  </div>
-                </div>
-                <Badge variant="outline" className="text-lg px-4 py-2">
-                  Page 1
-                </Badge>
+            <div className="ml-auto flex items-center gap-4">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
+                <span className="font-semibold text-yellow-600">{report.similarityScore}% Similarity</span>
               </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <ScrollArea className="h-[800px]">
-                <div className="p-12 bg-white dark:bg-gray-900">
-                  <div className="max-w-none prose prose-sm dark:prose-invert" style={{ 
-                    fontSize: '14px', 
-                    lineHeight: '1.8',
-                    fontFamily: 'Georgia, serif'
-                  }}>
-                    {renderHighlightedContent()}
-                  </div>
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          {/* Sidebar - Sources Summary */}
-          <div className="space-y-4">
-            {/* Quick Stats */}
-            <Card className="shadow-elevated border-2 border-accent/20">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Summary</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg text-center">
-                  <div className={`text-3xl font-bold ${getScoreColor(report.originality_score)}`}>
-                    {report.originality_score}%
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">Original</p>
-                </div>
-                
-                <Separator />
-                
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Plagiarism:</span>
-                    <span className="font-semibold text-yellow-600">{100 - report.originality_score - report.ai_score}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">AI Content:</span>
-                    <span className="font-semibold text-blue-600">{report.ai_score}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Matches:</span>
-                    <span className="font-semibold">{report.total_matches}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Sources List */}
-            <Card className="shadow-elevated">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Sources ({matches.length})</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <ScrollArea className="h-[600px]">
-                  <div className="px-4 pb-4 space-y-2">
-                    {matches.length === 0 ? (
-                      <p className="text-xs text-muted-foreground text-center py-8">
-                        No matches detected
-                      </p>
-                    ) : (
-                      matches.map((match, idx) => (
-                        <div
-                          key={match.id}
-                          className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                            selectedMatch === match.id
-                              ? "border-accent bg-accent/5"
-                              : "border-transparent hover:border-accent/30 hover:bg-secondary/50"
-                          }`}
-                          onClick={() => setSelectedMatch(match.id)}
-                        >
-                          <div className="flex items-start gap-2 mb-2">
-                            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold">
-                              {idx + 1}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                {getSourceIcon(match.source_type)}
-                                <span className={`text-xs font-bold ${match.match_type === "ai_generated" ? "text-blue-600" : "text-yellow-600"}`}>
-                                  {match.similarity_percentage}%
-                                </span>
-                              </div>
-                              <p className="text-xs font-medium truncate">{match.source_name}</p>
-                              <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
-                                {match.matched_text.substring(0, 80)}...
-                              </p>
-                            </div>
-                          </div>
-                          {match.source_url && (
-                            <a
-                              href={match.source_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-accent hover:underline"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              View source →
-                            </a>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
+                <span className="font-semibold text-blue-600">{report.aiScore}% AI</span>
+              </div>
+              <Badge variant="outline" className="text-xs">
+                {report.totalMatches} matches · {report.totalSources} sources
+              </Badge>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* 3-column layout */}
+      <div className="container mx-auto px-4 py-4">
+        <div className="grid lg:grid-cols-6 gap-4">
+          {/* Left: Filters */}
+          <div className="lg:col-span-1 lg:sticky lg:top-[120px] lg:self-start">
+            <ReportFilters settings={settings} onSettingsChange={setSettings} report={report} />
+          </div>
+
+          {/* Center: Document Viewer */}
+          <div className="lg:col-span-3">
+            <DocumentViewer
+              report={report}
+              settings={settings}
+              onSpanClick={handleSpanClick}
+              selectedSpanId={selectedSpanId}
+            />
+          </div>
+
+          {/* Right: Sidebar */}
+          <div className="lg:col-span-2 lg:sticky lg:top-[120px] lg:self-start">
+            <ReportSidebar
+              report={report}
+              selectedSpanId={selectedSpanId}
+              onSourceSelect={handleSourceSelect}
+              onSpanSelect={handleSpanSelect}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Evidence Drawer */}
+      <EvidenceDrawer
+        span={selectedSpan}
+        report={report}
+        open={evidenceOpen}
+        onClose={() => setEvidenceOpen(false)}
+        onNavigate={handleNavigateEvidence}
+        currentIndex={currentSpanIndex}
+        totalCount={sortedSpans.length}
+      />
     </div>
   );
 }
