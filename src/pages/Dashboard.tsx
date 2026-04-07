@@ -358,53 +358,85 @@ export default function Dashboard() {
                       <TableHead>Document</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Score</TableHead>
+                      <TableHead className="text-right">Similarity</TableHead>
+                      <TableHead className="text-right">AI Score</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {submissions.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                        <TableCell colSpan={6} className="text-center text-muted-foreground">
                           No submissions yet. Submit your first document above!
                         </TableCell>
                       </TableRow>
                     ) : (
-                      submissions.map((submission) => (
-                        <TableRow key={submission.id}>
-                          <TableCell className="font-medium">{submission.title}</TableCell>
-                          <TableCell>{new Date(submission.created_at).toLocaleDateString()}</TableCell>
-                          <TableCell>
-                            {submission.status === "completed" ? (
-                              <Badge className="bg-green-500">
-                                <CheckCircle2 className="mr-1 h-3 w-3" />
-                                Completed
-                              </Badge>
-                            ) : (
-                              <Badge variant="secondary">
-                                <Clock className="mr-1 h-3 w-3" />
-                                Processing
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {submission.originality_score ? (
-                              <span className="font-bold text-accent">{submission.originality_score}%</span>
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {submission.status === "completed" && (
-                              <Link to={`/report/${submission.id}`}>
-                                <Button size="sm" variant="outline">
-                                  View Report
-                                </Button>
-                              </Link>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))
+                      submissions.map((submission) => {
+                        const similarity = submission.originality_score != null
+                          ? Math.max(0, Math.min(100, 100 - submission.originality_score))
+                          : null;
+                        const aiScore = submission.ai_score != null
+                          ? Math.max(0, Math.min(100, submission.ai_score))
+                          : null;
+                        return (
+                          <TableRow key={submission.id}>
+                            <TableCell className="font-medium max-w-[200px] truncate">{submission.title}</TableCell>
+                            <TableCell className="text-xs">{new Date(submission.created_at).toLocaleDateString()}</TableCell>
+                            <TableCell>
+                              {submission.status === "completed" ? (
+                                <Badge className="bg-green-600 text-white">
+                                  <CheckCircle2 className="mr-1 h-3 w-3" />
+                                  Completed
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary">
+                                  <Clock className="mr-1 h-3 w-3" />
+                                  Processing
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {similarity != null ? (
+                                <span className={`font-bold ${similarity > 30 ? 'text-destructive' : similarity > 10 ? 'text-yellow-600' : 'text-green-600'}`}>
+                                  {similarity}%
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {aiScore != null ? (
+                                <span className="font-bold text-blue-600">{aiScore}%</span>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right space-x-1">
+                              {submission.status === "completed" && (
+                                <>
+                                  <Link to={`/report/${submission.id}`}>
+                                    <Button size="sm" variant="outline">View Report</Button>
+                                  </Link>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-destructive"
+                                    onClick={async () => {
+                                      if (!confirm('Delete this submission?')) return;
+                                      const { error } = await supabase.from('submissions').delete().eq('id', submission.id);
+                                      if (error) { toast.error('Failed to delete'); return; }
+                                      toast.success('Deleted');
+                                      loadSubmissions();
+                                    }}
+                                  >
+                                    Delete
+                                  </Button>
+                                </>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
                     )}
                   </TableBody>
                 </Table>
