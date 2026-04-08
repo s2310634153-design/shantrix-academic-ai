@@ -105,9 +105,9 @@ export default function Dashboard() {
       });
     }
     
-    // For binary files (PDF, DOCX), return placeholder text
-    // The edge function will handle proper extraction
-    return `[Document: ${file.name}] - Content will be extracted during analysis`;
+    // For binary files (PDF, DOCX), send a short placeholder
+    // The edge function will download the file and extract text server-side
+    return `[Document: ${file.name}]`;
   };
 
   const handleFileSubmit = async (e: React.FormEvent) => {
