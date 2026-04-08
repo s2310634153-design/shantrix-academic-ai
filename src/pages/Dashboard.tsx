@@ -148,16 +148,18 @@ export default function Dashboard() {
 
       if (submitError) throw submitError;
 
-      // Trigger analysis
-      const { error: analyzeError } = await supabase.functions.invoke('analyze-submission', {
+      // Trigger analysis (fire-and-forget, don't wait for completion)
+      supabase.functions.invoke('analyze-submission', {
         body: { submissionId: submission.id }
+      }).then(({ error }) => {
+        if (error) console.error('Analysis error:', error);
       });
 
-      if (analyzeError) throw analyzeError;
-
-      toast.success('File submitted for analysis!');
+      toast.success('File submitted for analysis! Processing in background...');
       setSelectedFile(null);
       loadSubmissions();
+      // Poll for completion
+      pollSubmissionStatus(submission.id);
     } catch (error: any) {
       console.error('Error submitting file:', error);
       toast.error(error.message || 'Failed to submit file');
@@ -187,16 +189,17 @@ export default function Dashboard() {
 
       if (submitError) throw submitError;
 
-      // Trigger analysis
-      const { error: analyzeError } = await supabase.functions.invoke('analyze-submission', {
+      // Trigger analysis (fire-and-forget)
+      supabase.functions.invoke('analyze-submission', {
         body: { submissionId: submission.id }
+      }).then(({ error }) => {
+        if (error) console.error('Analysis error:', error);
       });
 
-      if (analyzeError) throw analyzeError;
-
-      toast.success('Text submitted for analysis!');
+      toast.success('Text submitted for analysis! Processing in background...');
       setManualText('');
       loadSubmissions();
+      pollSubmissionStatus(submission.id);
     } catch (error: any) {
       console.error('Error submitting text:', error);
       toast.error(error.message || 'Failed to submit text');
