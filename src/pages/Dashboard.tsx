@@ -64,7 +64,28 @@ export default function Dashboard() {
     }
   };
 
-  const handleLogout = async () => {
+  const pollSubmissionStatus = (submissionId: string) => {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      const { data } = await supabase
+        .from('submissions')
+        .select('status')
+        .eq('id', submissionId)
+        .single();
+      if (data?.status === 'completed' || data?.status === 'failed' || attempts > 60) {
+        clearInterval(interval);
+        loadSubmissions();
+        if (data?.status === 'completed') {
+          toast.success('Analysis complete!');
+        } else if (data?.status === 'failed') {
+          toast.error('Analysis failed. Please try again.');
+        }
+      }
+    }, 5000);
+  };
+
+
     try {
       await supabase.auth.signOut();
       toast.success("Signed out successfully");
