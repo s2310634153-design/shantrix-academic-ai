@@ -64,7 +64,28 @@ export default function Dashboard() {
     }
   };
 
-  const handleLogout = async () => {
+  const pollSubmissionStatus = (submissionId: string) => {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      const { data } = await supabase
+        .from('submissions')
+        .select('status')
+        .eq('id', submissionId)
+        .single();
+      if (data?.status === 'completed' || data?.status === 'failed' || attempts > 60) {
+        clearInterval(interval);
+        loadSubmissions();
+        if (data?.status === 'completed') {
+          toast.success('Analysis complete!');
+        } else if (data?.status === 'failed') {
+          toast.error('Analysis failed. Please try again.');
+        }
+      }
+    }, 5000);
+  };
+
+
     try {
       await supabase.auth.signOut();
       toast.success("Signed out successfully");
@@ -148,16 +169,18 @@ export default function Dashboard() {
 
       if (submitError) throw submitError;
 
-      // Trigger analysis
-      const { error: analyzeError } = await supabase.functions.invoke('analyze-submission', {
+      // Trigger analysis (fire-and-forget, don't wait for completion)
+      supabase.functions.invoke('analyze-submission', {
         body: { submissionId: submission.id }
+      }).then(({ error }) => {
+        if (error) console.error('Analysis error:', error);
       });
 
-      if (analyzeError) throw analyzeError;
-
-      toast.success('File submitted for analysis!');
+      toast.success('File submitted for analysis! Processing in background...');
       setSelectedFile(null);
       loadSubmissions();
+      // Poll for completion
+      pollSubmissionStatus(submission.id);
     } catch (error: any) {
       console.error('Error submitting file:', error);
       toast.error(error.message || 'Failed to submit file');
@@ -187,16 +210,17 @@ export default function Dashboard() {
 
       if (submitError) throw submitError;
 
-      // Trigger analysis
-      const { error: analyzeError } = await supabase.functions.invoke('analyze-submission', {
+      // Trigger analysis (fire-and-forget)
+      supabase.functions.invoke('analyze-submission', {
         body: { submissionId: submission.id }
+      }).then(({ error }) => {
+        if (error) console.error('Analysis error:', error);
       });
 
-      if (analyzeError) throw analyzeError;
-
-      toast.success('Text submitted for analysis!');
+      toast.success('Text submitted for analysis! Processing in background...');
       setManualText('');
       loadSubmissions();
+      pollSubmissionStatus(submission.id);
     } catch (error: any) {
       console.error('Error submitting text:', error);
       toast.error(error.message || 'Failed to submit text');
