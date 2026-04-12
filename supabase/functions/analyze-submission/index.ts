@@ -18,24 +18,17 @@ function extractTextFromPDF(buffer: Uint8Array): string {
     const block = match[1];
     const tjRegex = /\(([^)]*)\)\s*Tj/g;
     let tjMatch;
-    while ((tjMatch = tjRegex.exec(block)) !== null) {
-      textParts.push(tjMatch[1]);
-    }
+    while ((tjMatch = tjRegex.exec(block)) !== null) textParts.push(tjMatch[1]);
     const tjArrayRegex = /\[(.*?)\]\s*TJ/g;
     let tjArrMatch;
     while ((tjArrMatch = tjArrayRegex.exec(block)) !== null) {
-      const arrContent = tjArrMatch[1];
       const strRegex = /\(([^)]*)\)/g;
       let strMatch;
-      while ((strMatch = strRegex.exec(arrContent)) !== null) {
-        textParts.push(strMatch[1]);
-      }
+      while ((strMatch = strRegex.exec(tjArrMatch[1])) !== null) textParts.push(strMatch[1]);
     }
   }
-  return textParts.join(' ')
-    .replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, ' ')
-    .replace(/\\\(/g, '(').replace(/\\\)/g, ')').replace(/\\\\/g, '\\')
-    .replace(/\s+/g, ' ').trim();
+  return textParts.join(' ').replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, ' ')
+    .replace(/\\\(/g, '(').replace(/\\\)/g, ')').replace(/\\\\/g, '\\').replace(/\s+/g, ' ').trim();
 }
 
 function extractTextFromDOCX(buffer: Uint8Array): string {
@@ -60,8 +53,6 @@ function extractTextFromDOCX(buffer: Uint8Array): string {
 }
 
 async function extractTextWithVision(fileBuffer: Uint8Array, fileName: string, apiKey: string): Promise<string> {
-  const extension = fileName.split('.').pop()?.toLowerCase();
-  if (extension !== 'pdf') throw new Error('Vision API only supports PDF files');
   const base64Content = btoa(String.fromCharCode(...fileBuffer));
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
@@ -99,26 +90,7 @@ async function extractTextWithAI(fileBuffer: Uint8Array, apiKey: string): Promis
   return data.choices?.[0]?.message?.content || '';
 }
 
-// ── Real Source Search APIs ──
-
-/** Extract key sentences from content for searching */
-function extractSearchQueries(content: string): string[] {
-  const sentences = content
-    .replace(/\n+/g, ' ')
-    .split(/(?<=[.!?])\s+/)
-    .filter(s => s.split(/\s+/).length >= 8 && s.split(/\s+/).length <= 40)
-    .map(s => s.trim());
-
-  // Pick diverse sentences: first, middle, last, and some random
-  const queries: string[] = [];
-  if (sentences.length === 0) return [];
-  
-  const step = Math.max(1, Math.floor(sentences.length / 12));
-  for (let i = 0; i < sentences.length && queries.length < 15; i += step) {
-    queries.push(sentences[i]);
-  }
-  return queries;
-}
+// ── Source Search APIs ──
 
 interface SourceMatch {
   matchedText: string;
@@ -129,7 +101,20 @@ interface SourceMatch {
   matchType: 'plagiarism';
 }
 
-/** Search Semantic Scholar for academic papers */
+function extractSearchQueries(content: string): string[] {
+  const sentences = content.replace(/\n+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .filter(s => s.split(/\s+/).length >= 8 && s.split(/\s+/).length <= 40)
+    .map(s => s.trim());
+  const queries: string[] = [];
+  if (sentences.length === 0) return [];
+  const step = Math.max(1, Math.floor(sentences.length / 15));
+  for (let i = 0; i < sentences.length && queries.length < 20; i += step) {
+    queries.push(sentences[i]);
+  }
+  return queries;
+}
+
 async function searchSemanticScholar(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 200));
@@ -139,17 +124,13 @@ async function searchSemanticScholar(query: string): Promise<SourceMatch[]> {
     if (!res.ok) return [];
     const data = await res.json();
     return (data.data || []).map((paper: any) => ({
-      matchedText: query,
-      sourceName: paper.title || 'Academic Paper',
-      sourceType: 'journal',
+      matchedText: query, sourceName: paper.title || 'Academic Paper', sourceType: 'journal',
       sourceUrl: paper.url || `https://www.semanticscholar.org/paper/${paper.paperId}`,
-      similarity: 0, // will be computed later
-      matchType: 'plagiarism' as const,
+      similarity: 0, matchType: 'plagiarism' as const,
     }));
   } catch { return []; }
 }
 
-/** Search CrossRef for journal articles */
 async function searchCrossRef(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 200));
@@ -161,19 +142,16 @@ async function searchCrossRef(query: string): Promise<SourceMatch[]> {
     return (data.message?.items || []).map((item: any) => ({
       matchedText: query,
       sourceName: Array.isArray(item.title) ? item.title[0] : (item.title || 'Journal Article'),
-      sourceType: 'publication',
-      sourceUrl: item.URL || `https://doi.org/${item.DOI}`,
-      similarity: 0,
-      matchType: 'plagiarism' as const,
+      sourceType: 'publication', sourceUrl: item.URL || `https://doi.org/${item.DOI}`,
+      similarity: 0, matchType: 'plagiarism' as const,
     }));
   } catch { return []; }
 }
 
-/** Search arXiv for research papers */
 async function searchArxiv(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 150));
-    const res = await fetch(`https://export.arxiv.org/api/query?search_query=all:${q}&max_results=2`);
+    const res = await fetch(`https://export.arxiv.org/api/query?search_query=all:${q}&max_results=3`);
     if (!res.ok) return [];
     const xml = await res.text();
     const entries: SourceMatch[] = [];
@@ -188,8 +166,7 @@ async function searchArxiv(query: string): Promise<SourceMatch[]> {
           sourceName: titleMatch[1].replace(/\s+/g, ' ').trim(),
           sourceType: 'journal',
           sourceUrl: linkMatch ? linkMatch[1].trim() : '',
-          similarity: 0,
-          matchType: 'plagiarism',
+          similarity: 0, matchType: 'plagiarism',
         });
       }
     }
@@ -197,53 +174,101 @@ async function searchArxiv(query: string): Promise<SourceMatch[]> {
   } catch { return []; }
 }
 
-/** Search PubMed for medical/biomedical papers */
 async function searchPubMed(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 200));
-    const searchRes = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax=2&term=${q}`);
+    const searchRes = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax=3&term=${q}`);
     if (!searchRes.ok) return [];
     const searchData = await searchRes.json();
     const ids = searchData.esearchresult?.idlist || [];
     if (ids.length === 0) return [];
-
     const summaryRes = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&retmode=json&id=${ids.join(',')}`);
     if (!summaryRes.ok) return [];
     const summaryData = await summaryRes.json();
-    
     return ids.map((id: string) => {
       const article = summaryData.result?.[id];
       return {
-        matchedText: query,
-        sourceName: article?.title || 'PubMed Article',
-        sourceType: 'publication',
-        sourceUrl: `https://pubmed.ncbi.nlm.nih.gov/${id}/`,
-        similarity: 0,
-        matchType: 'plagiarism' as const,
+        matchedText: query, sourceName: article?.title || 'PubMed Article', sourceType: 'publication',
+        sourceUrl: `https://pubmed.ncbi.nlm.nih.gov/${id}/`, similarity: 0, matchType: 'plagiarism' as const,
       };
     });
   } catch { return []; }
 }
 
-/** Search Wikipedia */
 async function searchWikipedia(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 150));
-    const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${q}&format=json&srlimit=2&srprop=snippet`);
+    const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${q}&format=json&srlimit=3&srprop=snippet`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.query?.search || []).map((r: any) => ({
-      matchedText: query,
-      sourceName: `Wikipedia: ${r.title}`,
-      sourceType: 'web',
+      matchedText: query, sourceName: `Wikipedia: ${r.title}`, sourceType: 'web',
       sourceUrl: `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, '_'))}`,
-      similarity: 0,
-      matchType: 'plagiarism' as const,
+      similarity: 0, matchType: 'plagiarism' as const,
     }));
   } catch { return []; }
 }
 
-/** Search all sources in parallel for a single query */
+/** Search CORE (open access research papers) */
+async function searchCORE(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 150));
+    const res = await fetch(`https://api.core.ac.uk/v3/search/works?q=${q}&limit=3`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || []).map((item: any) => ({
+      matchedText: query,
+      sourceName: item.title || 'Open Access Paper',
+      sourceType: 'repository',
+      sourceUrl: item.downloadUrl || item.sourceFulltextUrls?.[0] || `https://core.ac.uk/outputs/${item.id}`,
+      similarity: 0, matchType: 'plagiarism' as const,
+    }));
+  } catch { return []; }
+}
+
+/** Search OpenAlex (academic knowledge graph) */
+async function searchOpenAlex(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 200));
+    const res = await fetch(`https://api.openalex.org/works?search=${q}&per_page=3&select=id,title,doi,type`, {
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Shantrix/1.0 (mailto:mdnishanrahman0@gmail.com)' },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || []).map((item: any) => ({
+      matchedText: query,
+      sourceName: item.title || 'Academic Work',
+      sourceType: 'publication',
+      sourceUrl: item.doi ? `https://doi.org/${item.doi.replace('https://doi.org/','')}` : item.id,
+      similarity: 0, matchType: 'plagiarism' as const,
+    }));
+  } catch { return []; }
+}
+
+/** Search DOAJ (Directory of Open Access Journals) */
+async function searchDOAJ(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 150));
+    const res = await fetch(`https://doaj.org/api/search/articles/${q}?pageSize=3`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || []).map((item: any) => {
+      const bib = item.bibjson || {};
+      const link = bib.link?.[0]?.url || '';
+      return {
+        matchedText: query,
+        sourceName: bib.title || 'DOAJ Article',
+        sourceType: 'journal',
+        sourceUrl: link || `https://doaj.org/article/${item.id}`,
+        similarity: 0, matchType: 'plagiarism' as const,
+      };
+    });
+  } catch { return []; }
+}
+
+/** Search all sources in parallel */
 async function searchAllSources(query: string): Promise<SourceMatch[]> {
   const results = await Promise.allSettled([
     searchSemanticScholar(query),
@@ -251,6 +276,9 @@ async function searchAllSources(query: string): Promise<SourceMatch[]> {
     searchArxiv(query),
     searchPubMed(query),
     searchWikipedia(query),
+    searchCORE(query),
+    searchOpenAlex(query),
+    searchDOAJ(query),
   ]);
   const allMatches: SourceMatch[] = [];
   for (const r of results) {
@@ -335,19 +363,17 @@ serve(async (req) => {
 
     // ── Step 1: Search real sources ──
     const searchQueries = extractSearchQueries(content);
-    console.log(`Searching ${searchQueries.length} queries across academic sources...`);
+    console.log(`Searching ${searchQueries.length} queries across 8 academic & web sources...`);
 
     const allSourceResults: SourceMatch[] = [];
-    // Process in batches of 3 to avoid rate limiting
-    for (let i = 0; i < searchQueries.length; i += 3) {
-      const batch = searchQueries.slice(i, i + 3);
+    for (let i = 0; i < searchQueries.length; i += 4) {
+      const batch = searchQueries.slice(i, i + 4);
       const batchResults = await Promise.allSettled(batch.map(q => searchAllSources(q)));
       for (const r of batchResults) {
         if (r.status === 'fulfilled') allSourceResults.push(...r.value);
       }
-      // Small delay between batches
-      if (i + 3 < searchQueries.length) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+      if (i + 4 < searchQueries.length) {
+        await new Promise(resolve => setTimeout(resolve, 400));
       }
     }
 
@@ -362,11 +388,11 @@ serve(async (req) => {
     }
 
     // ── Step 2: AI analysis with real source context ──
-    const sourceContext = Array.from(uniqueSources.values()).slice(0, 20).map(s => 
+    const sourceContext = Array.from(uniqueSources.values()).slice(0, 25).map(s =>
       `- "${s.sourceName}" (${s.sourceType}) ${s.sourceUrl}`
     ).join('\n');
 
-    const maxLen = 12000;
+    const maxLen = 14000;
     const analysisContent = content.length > maxLen
       ? content.substring(0, maxLen) + '\n\n[Content truncated for analysis]'
       : content;
@@ -384,6 +410,7 @@ INSTRUCTIONS:
 5. matchedText must be VERBATIM text from the document (minimum 10 words, prefer 15-40 words)
 6. Carefully set startPos to the exact character offset where the matched text starts in the document
 7. Check EVERY paragraph - do not skip sections
+8. Be thorough - check for paraphrasing, not just exact copies
 
 Return JSON with:
 - originalityScore: 0-100 (100 = fully original)
@@ -394,7 +421,7 @@ Each match needs:
 - matchedText: exact verbatim text from the document
 - startPos: character position start (0-indexed)
 - endPos: character position end
-- sourceType: "journal", "web", "publication", or "ai_detector"
+- sourceType: "journal", "web", "publication", "repository", or "ai_detector"
 - sourceName: exact source title from the list above (or descriptive name for AI matches)
 - sourceUrl: exact URL from the list above (or empty for AI matches)
 - similarity: 50-100 (how similar)
@@ -463,7 +490,7 @@ ${analysisContent}`;
     const originalityScore = Math.max(0, Math.min(100, analysis.originalityScore || 0));
     const aiScore = Math.max(0, Math.min(100, analysis.aiScore || 0));
 
-    // Validate and fix match positions by finding exact text in content
+    // Validate and fix match positions
     const validatedMatches = (analysis.matches || []).map((match: any) => {
       let startPos = match.startPos || 0;
       let endPos = match.endPos || 0;
@@ -475,7 +502,6 @@ ${analysisContent}`;
           startPos = idx;
           endPos = idx + matchedText.length;
         } else {
-          // Try partial match with first 50 chars
           const partial = content.indexOf(matchedText.substring(0, 50));
           if (partial >= 0) {
             startPos = partial;
