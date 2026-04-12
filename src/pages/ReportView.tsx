@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileCheck, Download, Share2, ArrowLeft } from "lucide-react";
+import { FileCheck, Download, Share2, ArrowLeft, FileDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { buildReport } from "@/lib/reportBuilder";
@@ -13,6 +13,7 @@ import DocumentViewer from "@/components/report/DocumentViewer";
 import ReportFilters from "@/components/report/ReportFilters";
 import ReportSidebar from "@/components/report/ReportSidebar";
 import EvidenceDrawer from "@/components/report/EvidenceDrawer";
+import { exportReportPDF } from "@/lib/pdfExport";
 
 const DEFAULT_SETTINGS: ReportSettings = {
   showAllHighlights: true,
@@ -229,7 +230,11 @@ Generated on: ${new Date().toLocaleString()}
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={downloadReport}>
               <Download className="mr-1 h-4 w-4" />
-              Download
+              TXT
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => { if (report) { exportReportPDF(report); toast.success('PDF downloaded!'); } }}>
+              <FileDown className="mr-1 h-4 w-4" />
+              PDF
             </Button>
             <Button variant="outline" size="sm" onClick={() => toast.info('Share feature coming soon!')}>
               <Share2 className="mr-1 h-4 w-4" />

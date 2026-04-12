@@ -85,7 +85,7 @@ export default function Dashboard() {
     }, 5000);
   };
 
-
+  const handleSignOut = async () => {
     try {
       await supabase.auth.signOut();
       toast.success("Signed out successfully");
@@ -245,7 +245,7 @@ export default function Dashboard() {
             <span className="text-sm text-muted-foreground">
               Welcome, {user?.user_metadata?.full_name || user?.email}
             </span>
-            <Button variant="ghost" size="sm" onClick={handleLogout}>
+            <Button variant="ghost" size="sm" onClick={handleSignOut}>
               <LogOut className="mr-2 h-4 w-4" />
               Logout
             </Button>
