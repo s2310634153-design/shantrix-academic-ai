@@ -232,7 +232,7 @@ Generated on: ${new Date().toLocaleString()}
               <Download className="mr-1 h-4 w-4" />
               TXT
             </Button>
-            <Button variant="outline" size="sm" onClick={() => { if (report) { exportReportPDF(report); toast.success('PDF downloaded!'); } }}>
+            <Button variant="outline" size="sm" onClick={async () => { if (report) { toast.info('Generating PDF...'); await exportReportPDF(report); toast.success('PDF downloaded!'); } }}>
               <FileDown className="mr-1 h-4 w-4" />
               PDF
             </Button>
