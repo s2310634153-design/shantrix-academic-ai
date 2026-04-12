@@ -85,7 +85,7 @@ export default function Dashboard() {
     }, 5000);
   };
 
-
+  const handleSignOut = async () => {
     try {
       await supabase.auth.signOut();
       toast.success("Signed out successfully");
