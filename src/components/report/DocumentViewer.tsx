@@ -18,9 +18,32 @@ interface DocumentViewerProps {
   selectedSpanId: string | null;
 }
 
+// Turnitin-style colors for source numbers
+const TURNITIN_COLORS = [
+  { bg: "bg-red-600", text: "text-white" },
+  { bg: "bg-orange-500", text: "text-white" },
+  { bg: "bg-amber-500", text: "text-white" },
+  { bg: "bg-green-600", text: "text-white" },
+  { bg: "bg-teal-600", text: "text-white" },
+  { bg: "bg-blue-600", text: "text-white" },
+  { bg: "bg-indigo-600", text: "text-white" },
+  { bg: "bg-purple-600", text: "text-white" },
+  { bg: "bg-pink-600", text: "text-white" },
+  { bg: "bg-rose-600", text: "text-white" },
+];
+
 export default function DocumentViewer({ report, settings, onSpanClick, selectedSpanId }: DocumentViewerProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Build source index map for quick lookup
+  const sourceIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    report.sources.forEach((src, idx) => {
+      map.set(src.id, idx);
+    });
+    return map;
+  }, [report.sources]);
 
   // Filter spans based on settings
   const visibleSpans = useMemo(() => {
@@ -42,7 +65,6 @@ export default function DocumentViewer({ report, settings, onSpanClick, selected
       spans = spans.filter((s) => s.matchedWordCount >= settings.excludeSmallMatchesUnder);
     }
 
-    // TODO: Implement excludeQuotes and excludeBibliography when backend provides quote/bib detection
     return spans.sort((a, b) => a.startOffset - b.startOffset);
   }, [report.matchSpans, settings]);
 
@@ -76,27 +98,39 @@ export default function DocumentViewer({ report, settings, onSpanClick, selected
         );
       }
 
-      // Highlighted span
-      const colorSet = span.matchType === 'ai_generated'
+      // Determine color and source number
+      const isAI = span.matchType === 'ai_generated';
+      const sourceIdx = sourceIndexMap.get(span.sourceId) ?? 0;
+      const colorSet = isAI
         ? AI_HIGHLIGHT
         : SOURCE_COLORS[span.colorIndex % SOURCE_COLORS.length];
+      const turnitinColor = TURNITIN_COLORS[sourceIdx % TURNITIN_COLORS.length];
       const isSelected = selectedSpanId === span.id;
 
       parts.push(
         <Tooltip key={`m-${span.id}`}>
           <TooltipTrigger asChild>
-            <mark
-              className={`${colorSet.bg} border-b-2 ${colorSet.border} ${isSelected ? 'ring-2 ring-accent shadow-lg' : ''} px-0.5 rounded-sm cursor-pointer transition-all`}
-              onClick={() => onSpanClick(span)}
-              id={`span-${span.id}`}
-            >
-              {report.content.substring(spanStart, spanEnd)}
-            </mark>
+            <span className="inline relative">
+              <mark
+                className={`${colorSet.bg} border-b-2 ${colorSet.border} ${isSelected ? 'ring-2 ring-accent shadow-lg' : ''} px-0.5 rounded-sm cursor-pointer transition-all`}
+                onClick={() => onSpanClick(span)}
+                id={`span-${span.id}`}
+              >
+                {report.content.substring(spanStart, spanEnd)}
+              </mark>
+              {/* Turnitin-style numbered badge at end of highlight */}
+              <sup
+                className={`inline-flex items-center justify-center w-4 h-4 rounded-sm text-[9px] font-bold ${turnitinColor.bg} ${turnitinColor.text} ml-0.5 cursor-pointer align-super`}
+                onClick={() => onSpanClick(span)}
+              >
+                {isAI ? 'AI' : sourceIdx + 1}
+              </sup>
+            </span>
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-xs">
             <div className="text-xs space-y-1">
               <p className="font-semibold">{span.sourceTitle}</p>
-              <p>Type: {span.matchType === 'ai_generated' ? 'AI Generated' : 'Plagiarism'}</p>
+              <p>Type: {isAI ? 'AI Generated' : 'Plagiarism'}</p>
               <p>Words: {span.matchedWordCount} | Similarity: {span.similarityScoreForSpan}%</p>
               {span.sourceUrl && <p className="text-accent truncate">{span.sourceUrl}</p>}
             </div>
@@ -115,7 +149,7 @@ export default function DocumentViewer({ report, settings, onSpanClick, selected
     }
 
     return <div className="whitespace-pre-wrap leading-relaxed">{parts}</div>;
-  }, [report, visibleSpans, settings.highlightsOnlyMode, selectedSpanId, onSpanClick]);
+  }, [report, visibleSpans, settings.highlightsOnlyMode, selectedSpanId, onSpanClick, sourceIndexMap]);
 
   // Scroll to selected span
   useEffect(() => {
@@ -141,18 +175,18 @@ export default function DocumentViewer({ report, settings, onSpanClick, selected
             </Badge>
           </div>
         </div>
-        {/* Color legend */}
-        <div className="flex flex-wrap gap-3 mt-2 text-xs text-muted-foreground">
+        {/* Turnitin-style color legend with numbered badges */}
+        <div className="flex flex-wrap gap-2 mt-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-1">
-            <div className={`w-3 h-3 rounded-sm ${AI_HIGHLIGHT.bg} border ${AI_HIGHLIGHT.border}`} />
+            <span className={`inline-flex items-center justify-center w-4 h-4 rounded-sm text-[9px] font-bold bg-blue-500 text-white`}>AI</span>
             <span>AI Generated</span>
           </div>
-          {report.sources.slice(0, 5).map((src, i) => {
-            const c = SOURCE_COLORS[src.colorIndex % SOURCE_COLORS.length];
+          {report.sources.slice(0, 8).map((src, i) => {
+            const tc = TURNITIN_COLORS[i % TURNITIN_COLORS.length];
             return (
               <div key={src.id} className="flex items-center gap-1">
-                <div className={`w-3 h-3 rounded-sm ${c.bg} border ${c.border}`} />
-                <span className="truncate max-w-[100px]">{src.title}</span>
+                <span className={`inline-flex items-center justify-center w-4 h-4 rounded-sm text-[9px] font-bold ${tc.bg} ${tc.text}`}>{i + 1}</span>
+                <span className="truncate max-w-[80px]">{src.title}</span>
               </div>
             );
           })}

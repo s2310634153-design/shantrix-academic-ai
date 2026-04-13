@@ -90,7 +90,7 @@ async function extractTextWithAI(fileBuffer: Uint8Array, apiKey: string): Promis
   return data.choices?.[0]?.message?.content || '';
 }
 
-// ── Source Search APIs ──
+// ── Source Search APIs (13 free sources) ──
 
 interface SourceMatch {
   matchedText: string;
@@ -108,8 +108,9 @@ function extractSearchQueries(content: string): string[] {
     .map(s => s.trim());
   const queries: string[] = [];
   if (sentences.length === 0) return [];
-  const step = Math.max(1, Math.floor(sentences.length / 15));
-  for (let i = 0; i < sentences.length && queries.length < 20; i += step) {
+  // Take more samples for better coverage
+  const step = Math.max(1, Math.floor(sentences.length / 25));
+  for (let i = 0; i < sentences.length && queries.length < 30; i += step) {
     queries.push(sentences[i]);
   }
   return queries;
@@ -209,7 +210,6 @@ async function searchWikipedia(query: string): Promise<SourceMatch[]> {
   } catch { return []; }
 }
 
-/** Search CORE (open access research papers) */
 async function searchCORE(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 150));
@@ -228,7 +228,6 @@ async function searchCORE(query: string): Promise<SourceMatch[]> {
   } catch { return []; }
 }
 
-/** Search OpenAlex (academic knowledge graph) */
 async function searchOpenAlex(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 200));
@@ -247,7 +246,6 @@ async function searchOpenAlex(query: string): Promise<SourceMatch[]> {
   } catch { return []; }
 }
 
-/** Search DOAJ (Directory of Open Access Journals) */
 async function searchDOAJ(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 150));
@@ -268,7 +266,92 @@ async function searchDOAJ(query: string): Promise<SourceMatch[]> {
   } catch { return []; }
 }
 
-/** Search all sources in parallel */
+/** Search ERIC (Education Resources) */
+async function searchERIC(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 150));
+    const res = await fetch(`https://api.ies.ed.gov/eric/?search=${q}&rows=3&format=json`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.response?.docs || []).map((doc: any) => ({
+      matchedText: query,
+      sourceName: doc.title || 'ERIC Document',
+      sourceType: 'publication',
+      sourceUrl: doc.url || `https://eric.ed.gov/?id=${doc.id}`,
+      similarity: 0, matchType: 'plagiarism' as const,
+    }));
+  } catch { return []; }
+}
+
+/** Search BASE (Bielefeld Academic Search Engine) */
+async function searchBASE(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 150));
+    const res = await fetch(`https://api.base-search.net/cgi-bin/BaseHttpSearchInterface.fcgi?func=PerformSearch&query=${q}&format=json&hits=3`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.response?.docs || []).map((doc: any) => ({
+      matchedText: query,
+      sourceName: doc.dctitle || 'BASE Document',
+      sourceType: 'repository',
+      sourceUrl: doc.dclink || doc.dcidentifier || '',
+      similarity: 0, matchType: 'plagiarism' as const,
+    }));
+  } catch { return []; }
+}
+
+/** Search EuropePMC (European biomedical literature) */
+async function searchEuropePMC(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 150));
+    const res = await fetch(`https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${q}&format=json&pageSize=3`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.resultList?.result || []).map((item: any) => ({
+      matchedText: query,
+      sourceName: item.title || 'EuropePMC Article',
+      sourceType: 'publication',
+      sourceUrl: item.fullTextUrlList?.fullTextUrl?.[0]?.url || `https://europepmc.org/article/${item.source}/${item.id}`,
+      similarity: 0, matchType: 'plagiarism' as const,
+    }));
+  } catch { return []; }
+}
+
+/** Search Internet Archive (web archive) */
+async function searchInternetArchive(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 150));
+    const res = await fetch(`https://archive.org/advancedsearch.php?q=${q}&fl=title,identifier&rows=3&output=json`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.response?.docs || []).map((doc: any) => ({
+      matchedText: query,
+      sourceName: doc.title || 'Internet Archive',
+      sourceType: 'web',
+      sourceUrl: `https://archive.org/details/${doc.identifier}`,
+      similarity: 0, matchType: 'plagiarism' as const,
+    }));
+  } catch { return []; }
+}
+
+/** Search Google Books (public API, no key required) */
+async function searchGoogleBooks(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 150));
+    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=3`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.items || []).map((item: any) => ({
+      matchedText: query,
+      sourceName: item.volumeInfo?.title || 'Google Books',
+      sourceType: 'publication',
+      sourceUrl: item.volumeInfo?.infoLink || item.selfLink || '',
+      similarity: 0, matchType: 'plagiarism' as const,
+    }));
+  } catch { return []; }
+}
+
+/** Search all sources in parallel (13 sources) */
 async function searchAllSources(query: string): Promise<SourceMatch[]> {
   const results = await Promise.allSettled([
     searchSemanticScholar(query),
@@ -279,6 +362,11 @@ async function searchAllSources(query: string): Promise<SourceMatch[]> {
     searchCORE(query),
     searchOpenAlex(query),
     searchDOAJ(query),
+    searchERIC(query),
+    searchBASE(query),
+    searchEuropePMC(query),
+    searchInternetArchive(query),
+    searchGoogleBooks(query),
   ]);
   const allMatches: SourceMatch[] = [];
   for (const r of results) {
@@ -361,19 +449,19 @@ serve(async (req) => {
 
     console.log(`Content length: ${content.length} chars`);
 
-    // ── Step 1: Search real sources ──
+    // ── Step 1: Search real sources (13 sources in parallel) ──
     const searchQueries = extractSearchQueries(content);
-    console.log(`Searching ${searchQueries.length} queries across 8 academic & web sources...`);
+    console.log(`Searching ${searchQueries.length} queries across 13 academic & web sources...`);
 
     const allSourceResults: SourceMatch[] = [];
-    for (let i = 0; i < searchQueries.length; i += 4) {
-      const batch = searchQueries.slice(i, i + 4);
+    for (let i = 0; i < searchQueries.length; i += 5) {
+      const batch = searchQueries.slice(i, i + 5);
       const batchResults = await Promise.allSettled(batch.map(q => searchAllSources(q)));
       for (const r of batchResults) {
         if (r.status === 'fulfilled') allSourceResults.push(...r.value);
       }
-      if (i + 4 < searchQueries.length) {
-        await new Promise(resolve => setTimeout(resolve, 400));
+      if (i + 5 < searchQueries.length) {
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
     }
 
@@ -388,11 +476,11 @@ serve(async (req) => {
     }
 
     // ── Step 2: AI analysis with real source context ──
-    const sourceContext = Array.from(uniqueSources.values()).slice(0, 25).map(s =>
+    const sourceContext = Array.from(uniqueSources.values()).slice(0, 30).map(s =>
       `- "${s.sourceName}" (${s.sourceType}) ${s.sourceUrl}`
     ).join('\n');
 
-    const maxLen = 14000;
+    const maxLen = 16000;
     const analysisContent = content.length > maxLen
       ? content.substring(0, maxLen) + '\n\n[Content truncated for analysis]'
       : content;
@@ -409,8 +497,10 @@ INSTRUCTIONS:
 4. For each match, use the EXACT source name and URL from the list above
 5. matchedText must be VERBATIM text from the document (minimum 10 words, prefer 15-40 words)
 6. Carefully set startPos to the exact character offset where the matched text starts in the document
-7. Check EVERY paragraph - do not skip sections
+7. Check EVERY paragraph - do not skip sections. Cover the ENTIRE document.
 8. Be thorough - check for paraphrasing, not just exact copies
+9. Identify at least 5-15 matches if the document has substantial content
+10. For AI detection, look for: uniform sentence length, lack of personal voice, formulaic structure, excessive hedging language
 
 Return JSON with:
 - originalityScore: 0-100 (100 = fully original)
@@ -439,7 +529,7 @@ ${analysisContent}`;
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: 'You are a plagiarism and AI content detection engine. Return only valid JSON via the function call. Be thorough and check every paragraph.' },
+          { role: 'system', content: 'You are a plagiarism and AI content detection engine. Return only valid JSON via the function call. Be thorough and check every paragraph of the entire document.' },
           { role: 'user', content: analysisPrompt }
         ],
         tools: [{
