@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Globe, BookOpen, FileText, Bot, Search, AlertTriangle, Shield, ChevronRight } from "lucide-react";
-import { GeneratedReport, MatchSpan, SourceDocument, SOURCE_COLORS, AI_HIGHLIGHT, clampScore } from "@/types/report";
+import { GeneratedReport, MatchSpan, SOURCE_COLORS, AI_HIGHLIGHT, clampScore } from "@/types/report";
 
 interface ReportSidebarProps {
   report: GeneratedReport;
@@ -15,12 +15,37 @@ interface ReportSidebarProps {
   onSpanSelect: (spanId: string) => void;
 }
 
+// Turnitin-style source colors
+const TURNITIN_COLORS = [
+  { bg: "bg-red-600", text: "text-white" },
+  { bg: "bg-orange-500", text: "text-white" },
+  { bg: "bg-amber-500", text: "text-white" },
+  { bg: "bg-green-600", text: "text-white" },
+  { bg: "bg-teal-600", text: "text-white" },
+  { bg: "bg-blue-600", text: "text-white" },
+  { bg: "bg-indigo-600", text: "text-white" },
+  { bg: "bg-purple-600", text: "text-white" },
+  { bg: "bg-pink-600", text: "text-white" },
+  { bg: "bg-rose-600", text: "text-white" },
+];
+
 const getSourceIcon = (type: string) => {
   switch (type) {
     case 'journal': case 'publication': return <BookOpen className="h-4 w-4" />;
     case 'web': return <Globe className="h-4 w-4" />;
     case 'ai_detector': return <Bot className="h-4 w-4" />;
     default: return <FileText className="h-4 w-4" />;
+  }
+};
+
+const getSourceTypeLabel = (type: string) => {
+  switch (type) {
+    case 'journal': return 'Journal';
+    case 'publication': return 'Publication';
+    case 'web': return 'Internet Source';
+    case 'student': return 'Student Paper';
+    case 'repository': return 'Repository';
+    default: return type;
   }
 };
 
@@ -32,11 +57,9 @@ export default function ReportSidebar({ report, selectedSpanId, onSourceSelect, 
   const pubSources = report.sources.filter((s) => s.type === 'journal' || s.type === 'publication').length;
   const repoSources = report.sources.filter((s) => s.type === 'student' || s.type === 'repository').length;
 
-  const topSource = report.sources[0];
   const plagiarismSpans = report.matchSpans.filter((s) => s.matchType === 'plagiarism');
   const aiSpans = report.matchSpans.filter((s) => s.matchType === 'ai_generated');
 
-  // For AI analysis: group by paragraph
   const aiParagraphs = report.aiSpans.map((span) => ({
     ...span,
     text: report.content.substring(span.startOffset, Math.min(span.endOffset, span.startOffset + 150)),
@@ -52,9 +75,8 @@ export default function ReportSidebar({ report, selectedSpanId, onSourceSelect, 
     <Card className="shadow-elevated h-full">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <CardHeader className="py-2 px-3 border-b">
-          <TabsList className="grid grid-cols-5 h-8">
+          <TabsList className="grid grid-cols-4 h-8">
             <TabsTrigger value="summary" className="text-[10px] px-1">Summary</TabsTrigger>
-            <TabsTrigger value="matches" className="text-[10px] px-1">Matches</TabsTrigger>
             <TabsTrigger value="sources" className="text-[10px] px-1">Sources</TabsTrigger>
             <TabsTrigger value="ai" className="text-[10px] px-1">AI</TabsTrigger>
             <TabsTrigger value="flags" className="text-[10px] px-1">Flags</TabsTrigger>
@@ -63,107 +85,82 @@ export default function ReportSidebar({ report, selectedSpanId, onSourceSelect, 
 
         <CardContent className="p-0">
           <ScrollArea className="h-[700px]">
-            {/* Summary Tab */}
-            <TabsContent value="summary" className="m-0 p-4 space-y-4">
-              {/* Scores */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-yellow-50 dark:bg-yellow-900/10 rounded-lg text-center">
-                  <div className="text-2xl font-bold text-yellow-600">{report.similarityScore}%</div>
-                  <p className="text-[10px] text-muted-foreground mt-1">Similarity</p>
-                </div>
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg text-center">
-                  <div className="text-2xl font-bold text-blue-600">{report.aiScore}%</div>
-                  <p className="text-[10px] text-muted-foreground mt-1">AI Content</p>
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total Matched Spans</span>
-                  <span className="font-semibold">{report.totalMatches}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Web Sources</span>
-                  <span className="font-semibold">{webSources}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Publication Sources</span>
-                  <span className="font-semibold">{pubSources}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Repository Sources</span>
-                  <span className="font-semibold">{repoSources}</span>
-                </div>
-
-                <Separator />
-
-                {topSource && (
+            {/* Summary Tab - Turnitin Style */}
+            <TabsContent value="summary" className="m-0 p-0 space-y-0">
+              {/* Turnitin-style score header */}
+              <div className="border-b px-4 py-4">
+                <p className="text-xs font-semibold text-red-600 uppercase tracking-wider mb-3">Originality Report</p>
+                <div className="grid grid-cols-4 gap-2 text-center">
                   <div>
-                    <p className="text-muted-foreground mb-1">Most Matched Source</p>
-                    <div className="p-2 bg-secondary/50 rounded text-xs">
-                      <p className="font-medium truncate">{topSource.title}</p>
-                      <p className="text-muted-foreground">{topSource.percentContribution}% contribution</p>
-                    </div>
+                    <div className="text-2xl font-bold text-foreground">{report.similarityScore}<span className="text-sm">%</span></div>
+                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Similarity Index</p>
                   </div>
-                )}
-
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Word Count</span>
-                  <span className="font-semibold">{report.wordCount}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Pages</span>
-                  <span className="font-semibold">{report.totalPages}</span>
+                  <div>
+                    <div className="text-xl font-bold text-muted-foreground">{webSources}<span className="text-sm">%</span></div>
+                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Internet Sources</p>
+                  </div>
+                  <div>
+                    <div className="text-xl font-bold text-muted-foreground">{pubSources}<span className="text-sm">%</span></div>
+                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Publications</p>
+                  </div>
+                  <div>
+                    <div className="text-xl font-bold text-muted-foreground">{repoSources}<span className="text-sm">%</span></div>
+                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Student Papers</p>
+                  </div>
                 </div>
               </div>
-            </TabsContent>
 
-            {/* Match Overview Tab */}
-            <TabsContent value="matches" className="m-0 p-4 space-y-3">
-              <p className="text-xs text-muted-foreground">
-                {report.totalSources} sources, {report.totalMatches} matched spans
-              </p>
-              {report.sources.map((src, idx) => {
-                const c = SOURCE_COLORS[src.colorIndex % SOURCE_COLORS.length];
-                return (
-                  <div
-                    key={src.id}
-                    className="p-3 border rounded-lg cursor-pointer hover:border-accent/50 transition-all"
-                    onClick={() => onSourceSelect(src.id)}
-                  >
-                    <div className="flex items-start gap-2">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${c.bg} ${c.text}`}>
-                        {idx + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          {getSourceIcon(src.type)}
-                          <span className="text-xs font-medium truncate">{src.title}</span>
+              {/* AI Score */}
+              <div className="border-b px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider">AI Content Detection</p>
+                  <Badge variant={report.aiScore >= 50 ? "destructive" : "outline"} className="text-xs">
+                    {report.aiScore}%
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Primary Sources - Turnitin Style */}
+              <div className="px-4 py-3">
+                <p className="text-xs font-semibold text-red-600 uppercase tracking-wider mb-3">Primary Sources</p>
+                <div className="space-y-0">
+                  {report.sources.map((src, idx) => {
+                    const tc = TURNITIN_COLORS[idx % TURNITIN_COLORS.length];
+                    return (
+                      <div
+                        key={src.id}
+                        className="flex items-center gap-3 py-3 border-b last:border-b-0 cursor-pointer hover:bg-secondary/30 transition-colors -mx-4 px-4"
+                        onClick={() => onSourceSelect(src.id)}
+                      >
+                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded text-xs font-bold ${tc.bg} ${tc.text} flex-shrink-0`}>
+                          {idx + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-accent truncate">{src.title}</p>
+                          <p className="text-[10px] text-muted-foreground">{getSourceTypeLabel(src.type)}</p>
                         </div>
-                        {src.url && (
-                          <a
-                            href={src.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[10px] text-accent hover:underline truncate block"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {src.url}
-                          </a>
-                        )}
-                        <div className="flex gap-3 mt-1.5 text-[10px] text-muted-foreground">
-                          <span>{src.matchedWords} words</span>
-                          <span>{src.percentContribution}%</span>
-                          <span>{src.occurrences} occurrences</span>
-                        </div>
+                        <span className="text-xl font-light text-foreground flex-shrink-0">
+                          {src.percentContribution < 1 ? '<1' : src.percentContribution}<span className="text-sm">%</span>
+                        </span>
                       </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    </div>
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                  {report.sources.length === 0 && (
+                    <p className="text-xs text-muted-foreground text-center py-4">No sources detected</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Exclusion settings display */}
+              <div className="border-t px-4 py-3">
+                <div className="flex items-center gap-6 text-[10px] text-muted-foreground">
+                  <span>Exclude quotes <span className="font-medium text-foreground">On</span></span>
+                  <span>Exclude matches <span className="font-medium text-foreground">Off</span></span>
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  Exclude bibliography <span className="font-medium text-foreground">On</span>
+                </div>
+              </div>
             </TabsContent>
 
             {/* All Sources Tab */}
@@ -177,19 +174,29 @@ export default function ReportSidebar({ report, selectedSpanId, onSourceSelect, 
                   className="h-7 text-xs pl-7"
                 />
               </div>
-              {filteredSources.map((src) => (
-                <div
-                  key={src.id}
-                  className="flex items-center gap-2 p-2 rounded border hover:border-accent/50 cursor-pointer text-xs"
-                  onClick={() => onSourceSelect(src.id)}
-                >
-                  {getSourceIcon(src.type)}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{src.title}</p>
-                    <p className="text-[10px] text-muted-foreground">{src.type} · {src.percentContribution}%</p>
+              <p className="text-xs text-muted-foreground">
+                {report.totalSources} sources · {report.totalMatches} matched spans
+              </p>
+              {filteredSources.map((src, idx) => {
+                const realIdx = report.sources.indexOf(src);
+                const tc = TURNITIN_COLORS[realIdx % TURNITIN_COLORS.length];
+                return (
+                  <div
+                    key={src.id}
+                    className="flex items-center gap-2 p-2 rounded border hover:border-accent/50 cursor-pointer text-xs"
+                    onClick={() => onSourceSelect(src.id)}
+                  >
+                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-bold ${tc.bg} ${tc.text} flex-shrink-0`}>
+                      {realIdx + 1}
+                    </span>
+                    {getSourceIcon(src.type)}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{src.title}</p>
+                      <p className="text-[10px] text-muted-foreground">{getSourceTypeLabel(src.type)} · {src.percentContribution}%</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {filteredSources.length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-4">No sources found</p>
               )}

@@ -11,6 +11,20 @@ const FONT_SIZE = 9.5;
 const BRAND_GREEN: [number, number, number] = [16, 185, 129];
 const BRAND_DARK: [number, number, number] = [15, 23, 42];
 
+// Turnitin-style source badge colors
+const TURNITIN_PDF_COLORS: [number, number, number][] = [
+  [220, 38, 38],   // red
+  [234, 88, 12],   // orange
+  [202, 138, 4],   // amber
+  [22, 163, 74],   // green
+  [13, 148, 136],  // teal
+  [37, 99, 235],   // blue
+  [79, 70, 229],   // indigo
+  [147, 51, 234],  // purple
+  [219, 39, 119],  // pink
+  [225, 29, 72],   // rose
+];
+
 let logoDataUrl: string | null = null;
 
 async function loadLogo(): Promise<string> {
@@ -34,16 +48,13 @@ async function loadLogo(): Promise<string> {
 
 function addHeader(doc: jsPDF, logo: string) {
   const pageWidth = doc.internal.pageSize.getWidth();
-  // Green top bar
   doc.setFillColor(...BRAND_GREEN);
   doc.rect(0, 0, pageWidth, 3, "F");
 
-  // Logo image
   if (logo) {
     try { doc.addImage(logo, "PNG", MARGIN_LEFT, 5, 12, 12); } catch {}
   }
 
-  // Brand text
   doc.setFontSize(13);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...BRAND_GREEN);
@@ -54,13 +65,11 @@ function addHeader(doc: jsPDF, logo: string) {
   doc.setTextColor(120, 120, 120);
   doc.text("AI-Powered Academic Integrity Platform", MARGIN_LEFT + 14, 16);
 
-  // Page number
   const pageNum = (doc as any).internal.getCurrentPageInfo().pageNumber;
   doc.setFontSize(7);
   doc.setTextColor(150, 150, 150);
   doc.text(`Page ${pageNum}`, pageWidth - MARGIN_RIGHT, 12, { align: "right" });
 
-  // Separator
   doc.setDrawColor(220, 220, 220);
   doc.setLineWidth(0.3);
   doc.line(MARGIN_LEFT, 20, pageWidth - MARGIN_RIGHT, 20);
@@ -88,11 +97,15 @@ function ensureSpace(doc: jsPDF, y: number, needed: number, logo: string): numbe
   return y;
 }
 
-function buildHighlightMap(report: GeneratedReport): Map<number, { type: "plagiarism" | "ai_generated"; sourceTitle: string; similarity: number }> {
+function buildHighlightMap(report: GeneratedReport): Map<number, { type: "plagiarism" | "ai_generated"; sourceTitle: string; similarity: number; sourceIdx: number }> {
   const map = new Map();
+  const sourceIdxMap = new Map<string, number>();
+  report.sources.forEach((s, i) => sourceIdxMap.set(s.id, i));
+
   for (const span of report.matchSpans) {
+    const sourceIdx = sourceIdxMap.get(span.sourceId) ?? 0;
     for (let i = span.startOffset; i < span.endOffset; i++) {
-      map.set(i, { type: span.matchType, sourceTitle: span.sourceTitle, similarity: span.similarityScoreForSpan });
+      map.set(i, { type: span.matchType, sourceTitle: span.sourceTitle, similarity: span.similarityScoreForSpan, sourceIdx });
     }
   }
   return map;
@@ -104,79 +117,141 @@ export async function exportReportPDF(report: GeneratedReport) {
   const pageWidth = doc.internal.pageSize.getWidth();
   const contentWidth = pageWidth - MARGIN_LEFT - MARGIN_RIGHT;
 
+  // ═══════ COVER PAGE ═══════
   addHeader(doc, logo);
   let y = MARGIN_TOP;
 
-  // ── Cover Page ──
-  doc.setFontSize(22);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(...BRAND_DARK);
-  doc.text("Similarity Report", MARGIN_LEFT, y);
-  y += 10;
-
+  // Title & author
   doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(80, 80, 80);
   doc.text(report.title, MARGIN_LEFT, y);
-  y += 14;
-
-  // Score boxes
-  const boxW = contentWidth / 2 - 5;
-  doc.setFillColor(254, 243, 199);
-  doc.roundedRect(MARGIN_LEFT, y, boxW, 24, 3, 3, "F");
-  doc.setFontSize(8);
-  doc.setTextColor(120, 53, 15);
-  doc.text("SIMILARITY SCORE", MARGIN_LEFT + 5, y + 7);
-  doc.setFontSize(20);
-  doc.setFont("helvetica", "bold");
-  doc.text(`${report.similarityScore}%`, MARGIN_LEFT + 5, y + 19);
-
-  doc.setFillColor(219, 234, 254);
-  doc.roundedRect(MARGIN_LEFT + boxW + 10, y, boxW, 24, 3, 3, "F");
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(30, 64, 175);
-  doc.text("AI-GENERATED SCORE", MARGIN_LEFT + boxW + 15, y + 7);
-  doc.setFontSize(20);
-  doc.setFont("helvetica", "bold");
-  doc.text(`${report.aiScore}%`, MARGIN_LEFT + boxW + 15, y + 19);
-  y += 32;
-
-  // Meta
-  doc.setFontSize(7.5);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(100, 100, 100);
-  const meta = [
-    `File: ${report.fileName || report.title}`,
-    `Date: ${new Date(report.submissionDate).toLocaleDateString()}`,
-    `Words: ${report.wordCount.toLocaleString()} · Characters: ${report.charCount.toLocaleString()} · Pages: ${report.totalPages}`,
-    `Matches: ${report.totalMatches} · Sources: ${report.totalSources}`,
-    `Submission ID: ${report.submissionId}`,
-  ];
-  for (const line of meta) {
-    doc.text(line, MARGIN_LEFT, y);
-    y += 4.5;
-  }
-  y += 6;
-
-  // Legend
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(...BRAND_DARK);
-  doc.text("Highlight Legend:", MARGIN_LEFT, y);
-  y += 5;
-  doc.setFillColor(254, 240, 138);
-  doc.rect(MARGIN_LEFT, y - 3, 18, 4.5, "F");
-  doc.setFontSize(7);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(80, 80, 80);
-  doc.text("= Plagiarism Match", MARGIN_LEFT + 20, y);
-  doc.setFillColor(191, 219, 254);
-  doc.rect(MARGIN_LEFT + 65, y - 3, 18, 4.5, "F");
-  doc.text("= AI-Generated Content", MARGIN_LEFT + 85, y);
   y += 10;
 
-  // ── Line-by-Line Document ──
+  // Turnitin-style "ORIGINALITY REPORT" header
+  doc.setDrawColor(200, 0, 0);
+  doc.setLineWidth(0.5);
+  doc.line(MARGIN_LEFT, y, pageWidth - MARGIN_RIGHT, y);
+  y += 5;
+
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(200, 0, 0);
+  doc.text("ORIGINALITY REPORT", MARGIN_LEFT, y);
+  y += 6;
+
+  doc.setDrawColor(200, 200, 200);
+  doc.setLineWidth(0.3);
+  doc.line(MARGIN_LEFT, y, pageWidth - MARGIN_RIGHT, y);
+  y += 8;
+
+  // Score boxes - Turnitin style (4 columns)
+  const colW = contentWidth / 4;
+  const webSrcCount = report.sources.filter(s => s.type === 'web').length;
+  const pubSrcCount = report.sources.filter(s => ['journal', 'publication'].includes(s.type)).length;
+  const studentSrcCount = report.sources.filter(s => ['student', 'repository'].includes(s.type)).length;
+
+  const scores = [
+    { value: `${report.similarityScore}%`, label: "SIMILARITY INDEX", color: [200, 0, 0] as [number, number, number] },
+    { value: `${webSrcCount}%`, label: "INTERNET SOURCES", color: [80, 80, 80] as [number, number, number] },
+    { value: `${pubSrcCount}%`, label: "PUBLICATIONS", color: [80, 80, 80] as [number, number, number] },
+    { value: `${studentSrcCount}%`, label: "STUDENT PAPERS", color: [80, 80, 80] as [number, number, number] },
+  ];
+
+  for (let i = 0; i < scores.length; i++) {
+    const x = MARGIN_LEFT + i * colW;
+    doc.setFontSize(22);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...scores[i].color);
+    doc.text(scores[i].value, x, y + 5);
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(120, 120, 120);
+    doc.text(scores[i].label, x, y + 10);
+  }
+  y += 18;
+
+  // AI score
+  doc.setDrawColor(200, 200, 200);
+  doc.line(MARGIN_LEFT, y, pageWidth - MARGIN_RIGHT, y);
+  y += 6;
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(37, 99, 235);
+  doc.text(`AI CONTENT: ${report.aiScore}%`, MARGIN_LEFT, y);
+  y += 8;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(MARGIN_LEFT, y, pageWidth - MARGIN_RIGHT, y);
+  y += 8;
+
+  // PRIMARY SOURCES list - Turnitin style
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(200, 0, 0);
+  doc.text("PRIMARY SOURCES", MARGIN_LEFT, y);
+  y += 6;
+
+  for (let si = 0; si < report.sources.length; si++) {
+    const src = report.sources[si];
+    y = ensureSpace(doc, y, 16, logo);
+
+    const tc = TURNITIN_PDF_COLORS[si % TURNITIN_PDF_COLORS.length];
+
+    // Colored number badge
+    doc.setFillColor(...tc);
+    doc.roundedRect(MARGIN_LEFT, y - 4, 8, 8, 1, 1, "F");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(255, 255, 255);
+    doc.text(`${si + 1}`, MARGIN_LEFT + 4, y + 1, { align: "center" });
+
+    // Source title
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...tc);
+    doc.text(src.title.substring(0, 60), MARGIN_LEFT + 12, y);
+
+    // Source type
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(120, 120, 120);
+    const typeLabel = src.type === 'web' ? 'Internet Source' : src.type === 'journal' ? 'Journal' : src.type === 'publication' ? 'Publication' : src.type === 'student' ? 'Student Paper' : 'Repository';
+    doc.text(typeLabel, MARGIN_LEFT + 12, y + 4);
+
+    // Percentage on right
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(60, 60, 60);
+    const pctText = src.percentContribution < 1 ? '<1%' : `${src.percentContribution}%`;
+    doc.text(pctText, pageWidth - MARGIN_RIGHT, y, { align: "right" });
+
+    y += 12;
+    doc.setDrawColor(230, 230, 230);
+    doc.line(MARGIN_LEFT, y, pageWidth - MARGIN_RIGHT, y);
+    y += 4;
+  }
+
+  // Metadata
+  y = ensureSpace(doc, y, 20, logo);
+  y += 4;
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(120, 120, 120);
+  doc.text(`Submission date: ${new Date(report.submissionDate).toLocaleString()}`, MARGIN_LEFT, y); y += 4;
+  doc.text(`Submission ID: ${report.submissionId}`, MARGIN_LEFT, y); y += 4;
+  doc.text(`File name: ${report.fileName || report.title}`, MARGIN_LEFT, y); y += 4;
+  doc.text(`Word count: ${report.wordCount}  ·  Character count: ${report.charCount}`, MARGIN_LEFT, y); y += 4;
+
+  // Exclusion settings
+  y += 4;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(MARGIN_LEFT, y, pageWidth - MARGIN_RIGHT, y);
+  y += 5;
+  doc.setFontSize(7);
+  doc.text("Exclude quotes: On          Exclude matches: Off", MARGIN_LEFT, y); y += 4;
+  doc.text("Exclude bibliography: On", MARGIN_LEFT, y);
+
+  // ═══════ DOCUMENT WITH HIGHLIGHTS ═══════
   addFooter(doc);
   doc.addPage();
   addHeader(doc, logo);
@@ -186,6 +261,18 @@ export async function exportReportPDF(report: GeneratedReport) {
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...BRAND_DARK);
   doc.text("Document Analysis", MARGIN_LEFT, y);
+  y += 4;
+
+  // Legend
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(100, 100, 100);
+  doc.setFillColor(254, 240, 138);
+  doc.rect(MARGIN_LEFT, y, 12, 3.5, "F");
+  doc.text("= Plagiarism", MARGIN_LEFT + 14, y + 3);
+  doc.setFillColor(191, 219, 254);
+  doc.rect(MARGIN_LEFT + 50, y, 12, 3.5, "F");
+  doc.text("= AI Content", MARGIN_LEFT + 64, y + 3);
   y += 8;
 
   const highlightMap = buildHighlightMap(report);
@@ -205,7 +292,6 @@ export async function exportReportPDF(report: GeneratedReport) {
     doc.setFont("helvetica", "normal");
     const wrappedLines = doc.splitTextToSize(line, contentWidth - 8);
 
-    // Track position within current original line
     let lineCharCursor = globalCharOffset;
 
     for (const wLine of wrappedLines) {
@@ -216,11 +302,18 @@ export async function exportReportPDF(report: GeneratedReport) {
       let hasPlag = false;
       let hasAI = false;
       let matchLabel = "";
+      let sourceIdx = -1;
 
       for (let ci = segStart; ci < segEnd && ci < report.content.length; ci++) {
         const h = highlightMap.get(ci);
         if (h) {
-          if (h.type === "plagiarism") { hasPlag = true; if (!matchLabel) matchLabel = `[${h.sourceTitle.substring(0, 30)}]`; }
+          if (h.type === "plagiarism") {
+            hasPlag = true;
+            if (sourceIdx < 0) {
+              sourceIdx = h.sourceIdx;
+              matchLabel = `[${h.sourceIdx + 1}]`;
+            }
+          }
           if (h.type === "ai_generated") hasAI = true;
         }
       }
@@ -238,10 +331,16 @@ export async function exportReportPDF(report: GeneratedReport) {
       doc.setFont("helvetica", hasPlag || hasAI ? "bold" : "normal");
       doc.text(wLine, MARGIN_LEFT + 1, y);
 
-      if (hasPlag && matchLabel) {
-        doc.setFontSize(5);
-        doc.setTextColor(180, 83, 9);
-        doc.text(matchLabel, Math.min(MARGIN_LEFT + textW + 4, pageWidth - MARGIN_RIGHT - 25), y);
+      // Add Turnitin-style source number badge
+      if (hasPlag && sourceIdx >= 0) {
+        const badgeX = Math.min(MARGIN_LEFT + textW + 3, pageWidth - MARGIN_RIGHT - 8);
+        const tc = TURNITIN_PDF_COLORS[sourceIdx % TURNITIN_PDF_COLORS.length];
+        doc.setFillColor(...tc);
+        doc.roundedRect(badgeX, y - 3.5, 5, 4.5, 0.5, 0.5, "F");
+        doc.setFontSize(5.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(255, 255, 255);
+        doc.text(`${sourceIdx + 1}`, badgeX + 2.5, y, { align: "center" });
         doc.setFontSize(FONT_SIZE);
       }
 
@@ -252,7 +351,7 @@ export async function exportReportPDF(report: GeneratedReport) {
     globalCharOffset += line.length + 1;
   }
 
-  // ── Sources Appendix ──
+  // ═══════ SOURCES APPENDIX ═══════
   addFooter(doc);
   doc.addPage();
   addHeader(doc, logo);
@@ -264,37 +363,34 @@ export async function exportReportPDF(report: GeneratedReport) {
   doc.text("Sources", MARGIN_LEFT, y);
   y += 8;
 
-  const sourceColors: [number, number, number][] = [
-    [252, 165, 165], [253, 186, 116], [252, 211, 77], [253, 224, 71], [190, 242, 100],
-    [94, 234, 212], [103, 232, 249], [196, 181, 253], [249, 168, 212], [253, 164, 175],
-  ];
-
   for (let si = 0; si < report.sources.length; si++) {
     const src = report.sources[si];
     y = ensureSpace(doc, y, 18, logo);
 
-    const cIdx = src.colorIndex % 10;
-    doc.setFillColor(...sourceColors[cIdx]);
-    doc.rect(MARGIN_LEFT, y - 3, 3, 12, "F");
+    const tc = TURNITIN_PDF_COLORS[si % TURNITIN_PDF_COLORS.length];
 
-    // Source number
-    doc.setFontSize(8);
+    // Colored badge
+    doc.setFillColor(...tc);
+    doc.roundedRect(MARGIN_LEFT, y - 3, 7, 7, 1, 1, "F");
+    doc.setFontSize(7);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(...BRAND_DARK);
-    doc.text(`Source ${si + 1}`, MARGIN_LEFT + 6, y);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`${si + 1}`, MARGIN_LEFT + 3.5, y + 1, { align: "center" });
 
-    // Title
     doc.setFontSize(8.5);
-    doc.text(src.title.substring(0, 80), MARGIN_LEFT + 25, y);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...tc);
+    doc.text(src.title.substring(0, 70), MARGIN_LEFT + 10, y);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor(100, 100, 100);
-    doc.text(`Type: ${src.type} · Contribution: ${src.percentContribution}% · Words: ${src.matchedWords} · Matches: ${src.occurrences}`, MARGIN_LEFT + 6, y + 5);
+    const typeLabel = src.type === 'web' ? 'Internet Source' : src.type === 'journal' ? 'Journal' : src.type === 'publication' ? 'Publication' : src.type === 'student' ? 'Student Paper' : 'Repository';
+    doc.text(`${typeLabel} · Contribution: ${src.percentContribution}% · Words: ${src.matchedWords} · Matches: ${src.occurrences}`, MARGIN_LEFT + 10, y + 5);
 
     if (src.url) {
       doc.setTextColor(37, 99, 235);
-      doc.text(src.url.substring(0, 90), MARGIN_LEFT + 6, y + 9);
+      doc.text(src.url.substring(0, 85), MARGIN_LEFT + 10, y + 9);
     }
     y += 16;
   }
@@ -306,7 +402,7 @@ export async function exportReportPDF(report: GeneratedReport) {
     y += 8;
   }
 
-  // Summary stats
+  // Summary line
   y = ensureSpace(doc, y, 20, logo);
   y += 5;
   doc.setDrawColor(220, 220, 220);
