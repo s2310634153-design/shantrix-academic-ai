@@ -90,7 +90,7 @@ async function extractTextWithAI(fileBuffer: Uint8Array, apiKey: string): Promis
   return data.choices?.[0]?.message?.content || '';
 }
 
-// ── Source Search APIs (13 free sources) ──
+// ── Source Search APIs (15 free sources) ──
 
 interface SourceMatch {
   matchedText: string;
@@ -108,9 +108,8 @@ function extractSearchQueries(content: string): string[] {
     .map(s => s.trim());
   const queries: string[] = [];
   if (sentences.length === 0) return [];
-  // Take more samples for better coverage
-  const step = Math.max(1, Math.floor(sentences.length / 25));
-  for (let i = 0; i < sentences.length && queries.length < 30; i += step) {
+  const step = Math.max(1, Math.floor(sentences.length / 30));
+  for (let i = 0; i < sentences.length && queries.length < 35; i += step) {
     queries.push(sentences[i]);
   }
   return queries;
@@ -219,9 +218,7 @@ async function searchCORE(query: string): Promise<SourceMatch[]> {
     if (!res.ok) return [];
     const data = await res.json();
     return (data.results || []).map((item: any) => ({
-      matchedText: query,
-      sourceName: item.title || 'Open Access Paper',
-      sourceType: 'repository',
+      matchedText: query, sourceName: item.title || 'Open Access Paper', sourceType: 'repository',
       sourceUrl: item.downloadUrl || item.sourceFulltextUrls?.[0] || `https://core.ac.uk/outputs/${item.id}`,
       similarity: 0, matchType: 'plagiarism' as const,
     }));
@@ -237,9 +234,7 @@ async function searchOpenAlex(query: string): Promise<SourceMatch[]> {
     if (!res.ok) return [];
     const data = await res.json();
     return (data.results || []).map((item: any) => ({
-      matchedText: query,
-      sourceName: item.title || 'Academic Work',
-      sourceType: 'publication',
+      matchedText: query, sourceName: item.title || 'Academic Work', sourceType: 'publication',
       sourceUrl: item.doi ? `https://doi.org/${item.doi.replace('https://doi.org/','')}` : item.id,
       similarity: 0, matchType: 'plagiarism' as const,
     }));
@@ -256,9 +251,7 @@ async function searchDOAJ(query: string): Promise<SourceMatch[]> {
       const bib = item.bibjson || {};
       const link = bib.link?.[0]?.url || '';
       return {
-        matchedText: query,
-        sourceName: bib.title || 'DOAJ Article',
-        sourceType: 'journal',
+        matchedText: query, sourceName: bib.title || 'DOAJ Article', sourceType: 'journal',
         sourceUrl: link || `https://doaj.org/article/${item.id}`,
         similarity: 0, matchType: 'plagiarism' as const,
       };
@@ -266,7 +259,6 @@ async function searchDOAJ(query: string): Promise<SourceMatch[]> {
   } catch { return []; }
 }
 
-/** Search ERIC (Education Resources) */
 async function searchERIC(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 150));
@@ -274,16 +266,13 @@ async function searchERIC(query: string): Promise<SourceMatch[]> {
     if (!res.ok) return [];
     const data = await res.json();
     return (data.response?.docs || []).map((doc: any) => ({
-      matchedText: query,
-      sourceName: doc.title || 'ERIC Document',
-      sourceType: 'publication',
+      matchedText: query, sourceName: doc.title || 'ERIC Document', sourceType: 'publication',
       sourceUrl: doc.url || `https://eric.ed.gov/?id=${doc.id}`,
       similarity: 0, matchType: 'plagiarism' as const,
     }));
   } catch { return []; }
 }
 
-/** Search BASE (Bielefeld Academic Search Engine) */
 async function searchBASE(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 150));
@@ -291,16 +280,13 @@ async function searchBASE(query: string): Promise<SourceMatch[]> {
     if (!res.ok) return [];
     const data = await res.json();
     return (data.response?.docs || []).map((doc: any) => ({
-      matchedText: query,
-      sourceName: doc.dctitle || 'BASE Document',
-      sourceType: 'repository',
+      matchedText: query, sourceName: doc.dctitle || 'BASE Document', sourceType: 'repository',
       sourceUrl: doc.dclink || doc.dcidentifier || '',
       similarity: 0, matchType: 'plagiarism' as const,
     }));
   } catch { return []; }
 }
 
-/** Search EuropePMC (European biomedical literature) */
 async function searchEuropePMC(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 150));
@@ -308,16 +294,13 @@ async function searchEuropePMC(query: string): Promise<SourceMatch[]> {
     if (!res.ok) return [];
     const data = await res.json();
     return (data.resultList?.result || []).map((item: any) => ({
-      matchedText: query,
-      sourceName: item.title || 'EuropePMC Article',
-      sourceType: 'publication',
+      matchedText: query, sourceName: item.title || 'EuropePMC Article', sourceType: 'publication',
       sourceUrl: item.fullTextUrlList?.fullTextUrl?.[0]?.url || `https://europepmc.org/article/${item.source}/${item.id}`,
       similarity: 0, matchType: 'plagiarism' as const,
     }));
   } catch { return []; }
 }
 
-/** Search Internet Archive (web archive) */
 async function searchInternetArchive(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 150));
@@ -325,16 +308,13 @@ async function searchInternetArchive(query: string): Promise<SourceMatch[]> {
     if (!res.ok) return [];
     const data = await res.json();
     return (data.response?.docs || []).map((doc: any) => ({
-      matchedText: query,
-      sourceName: doc.title || 'Internet Archive',
-      sourceType: 'web',
+      matchedText: query, sourceName: doc.title || 'Internet Archive', sourceType: 'web',
       sourceUrl: `https://archive.org/details/${doc.identifier}`,
       similarity: 0, matchType: 'plagiarism' as const,
     }));
   } catch { return []; }
 }
 
-/** Search Google Books (public API, no key required) */
 async function searchGoogleBooks(query: string): Promise<SourceMatch[]> {
   try {
     const q = encodeURIComponent(query.substring(0, 150));
@@ -342,16 +322,52 @@ async function searchGoogleBooks(query: string): Promise<SourceMatch[]> {
     if (!res.ok) return [];
     const data = await res.json();
     return (data.items || []).map((item: any) => ({
-      matchedText: query,
-      sourceName: item.volumeInfo?.title || 'Google Books',
-      sourceType: 'publication',
+      matchedText: query, sourceName: item.volumeInfo?.title || 'Google Books', sourceType: 'publication',
       sourceUrl: item.volumeInfo?.infoLink || item.selfLink || '',
       similarity: 0, matchType: 'plagiarism' as const,
     }));
   } catch { return []; }
 }
 
-/** Search all sources in parallel (13 sources) */
+async function searchFATCAT(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 150));
+    const res = await fetch(`https://search.fatcat.wiki/fatcat_release/_search?q=${q}&size=3`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.hits?.hits || []).map((hit: any) => {
+      const src = hit._source || {};
+      return {
+        matchedText: query, sourceName: src.title || 'Fatcat Paper', sourceType: 'journal',
+        sourceUrl: `https://fatcat.wiki/release/${src.ident || hit._id}`,
+        similarity: 0, matchType: 'plagiarism' as const,
+      };
+    });
+  } catch { return []; }
+}
+
+async function searchCiteSeerX(query: string): Promise<SourceMatch[]> {
+  try {
+    const q = encodeURIComponent(query.substring(0, 150));
+    const res = await fetch(`https://citeseerx.ist.psu.edu/api/search?q=${q}&start=0&rows=3`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.response?.docs || []).map((doc: any) => ({
+      matchedText: query, sourceName: doc.title || 'CiteSeerX Paper', sourceType: 'publication',
+      sourceUrl: `https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=${doc.doi || doc.id}`,
+      similarity: 0, matchType: 'plagiarism' as const,
+    }));
+  } catch { return []; }
+}
+
+const SOURCE_NAMES = [
+  'Semantic Scholar', 'CrossRef', 'arXiv', 'PubMed', 'Wikipedia',
+  'CORE', 'OpenAlex', 'DOAJ', 'ERIC', 'BASE',
+  'EuropePMC', 'Internet Archive', 'Google Books', 'Fatcat', 'CiteSeerX'
+];
+
 async function searchAllSources(query: string): Promise<SourceMatch[]> {
   const results = await Promise.allSettled([
     searchSemanticScholar(query),
@@ -367,12 +383,19 @@ async function searchAllSources(query: string): Promise<SourceMatch[]> {
     searchEuropePMC(query),
     searchInternetArchive(query),
     searchGoogleBooks(query),
+    searchFATCAT(query),
+    searchCiteSeerX(query),
   ]);
   const allMatches: SourceMatch[] = [];
   for (const r of results) {
     if (r.status === 'fulfilled') allMatches.push(...r.value);
   }
   return allMatches;
+}
+
+// ── Progress helper ──
+async function updateProgress(supabaseClient: any, submissionId: string, status: string) {
+  await supabaseClient.from('submissions').update({ progress_status: status }).eq('id', submissionId);
 }
 
 // ── Main Handler ──
@@ -392,6 +415,8 @@ serve(async (req) => {
     if (!submissionId) throw new Error('Submission ID is required');
     console.log('Analyzing submission:', submissionId);
 
+    await updateProgress(supabaseClient, submissionId, 'Initializing analysis...');
+
     const { data: submission, error: fetchError } = await supabaseClient
       .from('submissions').select('*').eq('id', submissionId).single();
     if (fetchError) throw fetchError;
@@ -402,6 +427,7 @@ serve(async (req) => {
 
     // ── Extract text from file if needed ──
     if (isPlaceholder && submission.file_url) {
+      await updateProgress(supabaseClient, submissionId, 'Extracting text from document...');
       console.log('Extracting text from uploaded file...');
       try {
         const filePath = submission.file_url.split('/submissions/')[1];
@@ -425,6 +451,7 @@ serve(async (req) => {
         }
 
         if (extractedText.length < 50) {
+          await updateProgress(supabaseClient, submissionId, 'Using AI to extract text...');
           console.log('Using AI fallback for extraction...');
           if (extension === 'pdf') {
             extractedText = await extractTextWithVision(fileBuffer, fileName, LOVABLE_API_KEY);
@@ -442,19 +469,26 @@ serve(async (req) => {
         }
       } catch (extractError: any) {
         console.error('Extraction error:', extractError);
-        await supabaseClient.from('submissions').update({ status: 'failed' }).eq('id', submissionId);
+        await supabaseClient.from('submissions').update({ status: 'failed', progress_status: 'Extraction failed' }).eq('id', submissionId);
         throw new Error(`Text extraction failed: ${extractError.message}`);
       }
     }
 
     console.log(`Content length: ${content.length} chars`);
 
-    // ── Step 1: Search real sources (13 sources in parallel) ──
+    // ── Step 1: Search real sources (15 sources in parallel) ──
     const searchQueries = extractSearchQueries(content);
-    console.log(`Searching ${searchQueries.length} queries across 13 academic & web sources...`);
+    console.log(`Searching ${searchQueries.length} queries across 15 academic & web sources...`);
 
     const allSourceResults: SourceMatch[] = [];
+    const totalBatches = Math.ceil(searchQueries.length / 5);
+
     for (let i = 0; i < searchQueries.length; i += 5) {
+      const batchNum = Math.floor(i / 5) + 1;
+      const currentSourceIdx = (batchNum - 1) % SOURCE_NAMES.length;
+      const searchingNames = SOURCE_NAMES.slice(currentSourceIdx, currentSourceIdx + 3).join(', ');
+      await updateProgress(supabaseClient, submissionId, `Searching ${searchingNames}... (batch ${batchNum}/${totalBatches})`);
+
       const batch = searchQueries.slice(i, i + 5);
       const batchResults = await Promise.allSettled(batch.map(q => searchAllSources(q)));
       for (const r of batchResults) {
@@ -466,6 +500,7 @@ serve(async (req) => {
     }
 
     console.log(`Found ${allSourceResults.length} potential source matches`);
+    await updateProgress(supabaseClient, submissionId, 'Analyzing content with AI...');
 
     // Deduplicate sources by name
     const uniqueSources = new Map<string, SourceMatch>();
@@ -484,6 +519,8 @@ serve(async (req) => {
     const analysisContent = content.length > maxLen
       ? content.substring(0, maxLen) + '\n\n[Content truncated for analysis]'
       : content;
+
+    await updateProgress(supabaseClient, submissionId, 'Running deep plagiarism & AI detection...');
 
     const analysisPrompt = `You are an expert plagiarism and AI content detector. Analyze this text thoroughly.
 
@@ -573,6 +610,8 @@ ${analysisContent}`;
       throw new Error('AI analysis failed');
     }
 
+    await updateProgress(supabaseClient, submissionId, 'Processing results...');
+
     const aiData = await aiResponse.json();
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     const analysis = JSON.parse(toolCall?.function?.arguments || '{}');
@@ -605,6 +644,7 @@ ${analysisContent}`;
     }).filter((m: any) => m.matchedText && m.matchedText.length > 10);
 
     console.log(`Results: originality=${originalityScore}, ai=${aiScore}, matches=${validatedMatches.length}`);
+    await updateProgress(supabaseClient, submissionId, 'Saving report...');
 
     // ── Save to DB ──
     const { data: report, error: reportError } = await supabaseClient
@@ -635,7 +675,8 @@ ${analysisContent}`;
     await supabaseClient.from('submissions').update({
       status: 'completed',
       originality_score: originalityScore,
-      ai_score: aiScore
+      ai_score: aiScore,
+      progress_status: 'Analysis complete'
     }).eq('id', submissionId);
 
     return new Response(

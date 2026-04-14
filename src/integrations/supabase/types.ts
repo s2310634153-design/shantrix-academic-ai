@@ -177,6 +177,7 @@ export type Database = {
           file_url: string | null
           id: string
           originality_score: number | null
+          progress_status: string | null
           status: string
           title: string
           updated_at: string
@@ -190,6 +191,7 @@ export type Database = {
           file_url?: string | null
           id?: string
           originality_score?: number | null
+          progress_status?: string | null
           status?: string
           title: string
           updated_at?: string
@@ -203,6 +205,7 @@ export type Database = {
           file_url?: string | null
           id?: string
           originality_score?: number | null
+          progress_status?: string | null
           status?: string
           title?: string
           updated_at?: string
