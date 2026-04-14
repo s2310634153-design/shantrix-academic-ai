@@ -188,7 +188,7 @@ export async function exportReportPDF(report: GeneratedReport) {
     const tc = TURNITIN_PDF_COLORS[si % TURNITIN_PDF_COLORS.length];
 
     // Colored badge
-    cover.drawRectangle({ x: MARGIN, y: y - 2, width: 12, height: 12, color: tc, borderRadius: 2 });
+    cover.drawRectangle({ x: MARGIN, y: y - 2, width: 12, height: 12, color: tc });
     cover.drawText(`${si + 1}`, { x: MARGIN + (si + 1 >= 10 ? 2 : 4), y: y + 1, size: 8, font: boldFont, color: WHITE });
 
     // Source title
@@ -308,7 +308,7 @@ export async function exportReportPDF(report: GeneratedReport) {
 
   // Save
   const pdfBytes = await reportDoc.save();
-  const blob = new Blob([pdfBytes], { type: "application/pdf" });
+  const blob = new Blob([pdfBytes as unknown as BlobPart], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
