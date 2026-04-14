@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { FileCheck, Upload, FileText, Clock, CheckCircle2, LogOut, Lightbulb, Wand2, FileSearch, CreditCard, Shield } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { FileCheck, Upload, FileText, Clock, CheckCircle2, LogOut, Lightbulb, Wand2, FileSearch, CreditCard, Shield, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
@@ -22,10 +23,10 @@ export default function Dashboard() {
   const [manualText, setManualText] = useState("");
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [progressMap, setProgressMap] = useState<Record<string, string>>({});
   const { role, isAdmin } = useUserRole();
 
   useEffect(() => {
-    // Check authentication
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setUser(session.user);
@@ -36,7 +37,6 @@ export default function Dashboard() {
       setIsLoading(false);
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setUser(session.user);
@@ -70,11 +70,21 @@ export default function Dashboard() {
       attempts++;
       const { data } = await supabase
         .from('submissions')
-        .select('status')
+        .select('status, progress_status')
         .eq('id', submissionId)
         .single();
-      if (data?.status === 'completed' || data?.status === 'failed' || attempts > 60) {
+
+      if (data?.progress_status) {
+        setProgressMap(prev => ({ ...prev, [submissionId]: data.progress_status }));
+      }
+
+      if (data?.status === 'completed' || data?.status === 'failed' || attempts > 120) {
         clearInterval(interval);
+        setProgressMap(prev => {
+          const next = { ...prev };
+          delete next[submissionId];
+          return next;
+        });
         loadSubmissions();
         if (data?.status === 'completed') {
           toast.success('Analysis complete!');
@@ -82,7 +92,7 @@ export default function Dashboard() {
           toast.error('Analysis failed. Please try again.');
         }
       }
-    }, 5000);
+    }, 3000);
   };
 
   const handleSignOut = async () => {
@@ -103,7 +113,6 @@ export default function Dashboard() {
     );
   }
 
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
@@ -112,22 +121,14 @@ export default function Dashboard() {
 
   const extractTextFromFile = async (file: File): Promise<string> => {
     const extension = file.name.split('.').pop()?.toLowerCase();
-    
-    // Only extract text from .txt files on client side
     if (extension === 'txt') {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (e) => {
-          const text = e.target?.result as string;
-          resolve(text);
-        };
+        reader.onload = (e) => resolve(e.target?.result as string);
         reader.onerror = reject;
         reader.readAsText(file);
       });
     }
-    
-    // For binary files (PDF, DOCX), send a short placeholder
-    // The edge function will download the file and extract text server-side
     return `[Document: ${file.name}]`;
   };
 
@@ -137,10 +138,7 @@ export default function Dashboard() {
 
     setIsSubmitting(true);
     try {
-      // Extract text from file
       const content = await extractTextFromFile(selectedFile);
-      
-      // Upload file to storage
       const filePath = `${user.id}/${Date.now()}_${selectedFile.name}`;
       const { error: uploadError } = await supabase.storage
         .from('submissions')
@@ -148,12 +146,10 @@ export default function Dashboard() {
 
       if (uploadError) throw uploadError;
 
-      // Get public URL
       const { data: { publicUrl } } = supabase.storage
         .from('submissions')
         .getPublicUrl(filePath);
 
-      // Create submission
       const { data: submission, error: submitError } = await supabase
         .from('submissions')
         .insert({
@@ -169,17 +165,16 @@ export default function Dashboard() {
 
       if (submitError) throw submitError;
 
-      // Trigger analysis (fire-and-forget, don't wait for completion)
       supabase.functions.invoke('analyze-submission', {
         body: { submissionId: submission.id }
       }).then(({ error }) => {
         if (error) console.error('Analysis error:', error);
       });
 
-      toast.success('File submitted for analysis! Processing in background...');
+      toast.success('File submitted for analysis!');
       setSelectedFile(null);
+      setProgressMap(prev => ({ ...prev, [submission.id]: 'Initializing...' }));
       loadSubmissions();
-      // Poll for completion
       pollSubmissionStatus(submission.id);
     } catch (error: any) {
       console.error('Error submitting file:', error);
@@ -195,7 +190,6 @@ export default function Dashboard() {
 
     setIsSubmitting(true);
     try {
-      // Create submission
       const title = manualText.substring(0, 50) + (manualText.length > 50 ? '...' : '');
       const { data: submission, error: submitError } = await supabase
         .from('submissions')
@@ -210,15 +204,15 @@ export default function Dashboard() {
 
       if (submitError) throw submitError;
 
-      // Trigger analysis (fire-and-forget)
       supabase.functions.invoke('analyze-submission', {
         body: { submissionId: submission.id }
       }).then(({ error }) => {
         if (error) console.error('Analysis error:', error);
       });
 
-      toast.success('Text submitted for analysis! Processing in background...');
+      toast.success('Text submitted for analysis!');
       setManualText('');
+      setProgressMap(prev => ({ ...prev, [submission.id]: 'Initializing...' }));
       loadSubmissions();
       pollSubmissionStatus(submission.id);
     } catch (error: any) {
@@ -402,6 +396,9 @@ export default function Dashboard() {
                         const aiScore = submission.ai_score != null
                           ? Math.max(0, Math.min(100, submission.ai_score))
                           : null;
+                        const progressText = progressMap[submission.id];
+                        const isProcessing = submission.status === 'processing';
+
                         return (
                           <TableRow key={submission.id}>
                             <TableCell className="font-medium max-w-[200px] truncate">{submission.title}</TableCell>
@@ -412,11 +409,23 @@ export default function Dashboard() {
                                   <CheckCircle2 className="mr-1 h-3 w-3" />
                                   Completed
                                 </Badge>
+                              ) : submission.status === "failed" ? (
+                                <Badge variant="destructive">Failed</Badge>
                               ) : (
-                                <Badge variant="secondary">
-                                  <Clock className="mr-1 h-3 w-3" />
-                                  Processing
-                                </Badge>
+                                <div className="space-y-1.5 min-w-[180px]">
+                                  <Badge variant="secondary" className="flex items-center gap-1 w-fit">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Processing
+                                  </Badge>
+                                  {progressText && (
+                                    <div className="space-y-1">
+                                      <p className="text-[10px] text-muted-foreground font-medium truncate max-w-[180px]">
+                                        {progressText}
+                                      </p>
+                                      <Progress value={undefined} className="h-1.5 w-full" />
+                                    </div>
+                                  )}
+                                </div>
                               )}
                             </TableCell>
                             <TableCell className="text-right">
